@@ -29,29 +29,39 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using System;
-
+using cloudscribe.Core.Models.Identity;
+using cloudscribe.Core.Web.Mvc;
+using cloudscribe.Core.Web.Mvc.Components;
+using cloudscribe.Messaging.Email.Smtp;
+using cloudscribe.Messaging.Email.SendGrid;
+using cloudscribe.Messaging.Email.Mailgun;
+using cloudscribe.Messaging.Email.ElasticEmail;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
     public static class StartupExtensions
     {
-        [Obsolete("This method is deprecated, you should use services.AddCloudscribeCoreMvc instead.")]
-        public static IServiceCollection AddCloudscribeCore(this IServiceCollection services, IConfiguration configuration)
+        public static IServiceCollection AddCloudscribeCoreMvc(this IServiceCollection services, IConfiguration configuration)
         {
-
             services.AddCloudscribeCoreCommon(configuration);
+            //services.AddScoped<IVersionProvider, ControllerVersionInfo>();
+
+            services.TryAddScoped<IDecideErrorResponseType, DefaultErrorResponseTypeDecider>();
+
 
             return services;
         }
+
+        
 
 
         public static IServiceCollection AddCloudscribeCoreCommon(this IServiceCollection services, IConfiguration configuration)
         {
             services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
-            services.TryAddScoped<ISmtpOptionsProvider, SiteSmtpOptionsResolver>();
+            
             services.Configure<MultiTenantOptions>(configuration.GetSection("MultiTenantOptions"));
-            services.Configure<SmtpOptions>(configuration.GetSection("SmtpOptions"));
+            
             services.Configure<RecaptchaKeys>(configuration.GetSection("RecaptchaKeys"));
             services.Configure<SiteConfigOptions>(configuration.GetSection("SiteConfigOptions"));
             services.Configure<UIOptions>(configuration.GetSection("UIOptions"));
@@ -82,14 +92,9 @@ namespace Microsoft.Extensions.DependencyInjection
             services.TryAddScoped<IHandleCustomUserInfoAdmin, NoUserEditCustomization>();
 
             services.TryAddScoped<IHandleAccountAnalytics, GoogleAccountAnalytics>();
-
-            //
-
-            //
-
+            
             services.AddCloudscribeCommmon(configuration);
             
-
             services.AddCloudscribePagination();
 
             services.AddScoped<IVersionProviderFactory, VersionProviderFactory>();
@@ -97,9 +102,15 @@ namespace Microsoft.Extensions.DependencyInjection
             services.AddScoped<IVersionProvider, DataStorageVersionInfo>();
             services.AddScoped<IVersionProvider, IdentityVersionInfo>();
 
-
+            services.Configure<SmtpOptions>(configuration.GetSection("SmtpOptions"));
+            services.TryAddScoped<ISmtpOptionsProvider, SiteSmtpOptionsResolver>();
+            services.TryAddScoped<IEmailSenderResolver, SiteEmailSenderResolver>();
             services.AddTransient<ISiteMessageEmailSender, SiteEmailMessageSender>();
             //services.AddTransient<ISiteMessageEmailSender, FakeSiteEmailSender>();
+            services.TryAddScoped<ISendGridOptionsProvider, SiteSendGridOptionsProvider>();
+            services.TryAddScoped<IMailgunOptionsProvider, SiteMailgunOptionsProvider>();
+            services.TryAddScoped<IElasticEmailOptionsProvider, SiteElasticEmailOptionsProvider>();
+            services.AddCloudscribeEmailSenders(configuration);
             
             services.AddTransient<ISmsSender, SiteSmsSender>();
 
@@ -121,6 +132,8 @@ namespace Microsoft.Extensions.DependencyInjection
 
             services.TryAddSingleton<ITempDataProvider, CookieTempDataProvider>();
             services.TryAddScoped<IRecaptchaKeysProvider, SiteRecaptchaKeysProvider>();
+
+            services.TryAddScoped<INewUserDisplayNameResolver, DefaultNewUserDisplayNameResolver>();
 
             services.AddCloudscribeFileManagerIntegration(configuration);
 
@@ -213,6 +226,15 @@ namespace Microsoft.Extensions.DependencyInjection
                 });
 
             return options;
+        }
+
+        [Obsolete("This method is deprecated, you should use services.AddCloudscribeCoreMvc instead.")]
+        public static IServiceCollection AddCloudscribeCore(this IServiceCollection services, IConfiguration configuration)
+        {
+
+            services.AddCloudscribeCoreCommon(configuration);
+
+            return services;
         }
 
     }
