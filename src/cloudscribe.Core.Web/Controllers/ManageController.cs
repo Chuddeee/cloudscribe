@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:					Joe Audette
 // Created:					2014-10-26
-// Last Modified:			2017-10-06
+// Last Modified:			2018-04-05
 // 
 
 using cloudscribe.Core.Identity;
@@ -32,7 +32,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             SiteContext currentSite,
             SiteUserManager<SiteUser> userManager,
             SignInManager<SiteUser> signInManager,
-            ISmsSender smsSender,
+            //ISmsSender smsSender,
             IStringLocalizer<CloudscribeCore> localizer,
             ITimeZoneIdResolver timeZoneIdResolver,
             ITimeZoneHelper timeZoneHelper,
@@ -41,30 +41,27 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             UrlEncoder urlEncoder
             )
         {
-            Site = currentSite; 
-            this.userManager = userManager;
-            this.signInManager = signInManager;
-            this.smsSender = smsSender;
-            sr = localizer;
-            this.timeZoneIdResolver = timeZoneIdResolver;
-            tzHelper = timeZoneHelper;
-            this.customUserInfo = customUserInfo;
-            _logger = logger;
-            _urlEncoder = urlEncoder;
+            CurrentSite = currentSite; 
+            UserManager = userManager;
+            SignInManager = signInManager;
+            StringLocalizer = localizer;
+            TimeZoneIdResolver = timeZoneIdResolver;
+            TimeZoneHelper = timeZoneHelper;
+            CustomUserInfo = customUserInfo;
+            Log = logger;
+            UrlEncoder = urlEncoder;
         }
 
-        private readonly ILogger _logger;
-        private readonly ISiteContext Site;
-        private readonly SiteUserManager<SiteUser> userManager;
-        private readonly SignInManager<SiteUser> signInManager;
-        //private readonly IAuthEmailSender emailSender;
-        private readonly ISmsSender smsSender;
-        private IStringLocalizer sr;
-        private ITimeZoneIdResolver timeZoneIdResolver;
-        private ITimeZoneHelper tzHelper;
-        private IHandleCustomUserInfo customUserInfo;
-        private const string AuthenicatorUriFormat = "otpauth://totp/{0}:{1}?secret={2}&issuer={0}&digits=6";
-        private readonly UrlEncoder _urlEncoder;
+        protected ILogger Log { get; private set; }
+        protected ISiteContext CurrentSite { get; private set; }
+        protected SiteUserManager<SiteUser> UserManager { get; private set; }
+        protected SignInManager<SiteUser> SignInManager { get; private set; }
+        protected IStringLocalizer StringLocalizer { get; private set; }
+        protected ITimeZoneIdResolver TimeZoneIdResolver { get; private set; }
+        protected ITimeZoneHelper TimeZoneHelper { get; private set; }
+        protected IHandleCustomUserInfo CustomUserInfo { get; private set; }
+        protected const string AuthenicatorUriFormat = "otpauth://totp/{0}:{1}?secret={2}&issuer={0}&digits=6";
+        protected UrlEncoder UrlEncoder { get; private set; }
 
         [TempData]
         public string StatusMessage { get; set; }
@@ -74,21 +71,21 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> Index()
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
             var model = new AccountIndexViewModel
             {
-                HasPassword = (user.PasswordHash.Length > 0),
-                PhoneNumber = user.PhoneNumber.Length > 0 ? user.PhoneNumber : null,
+                HasPassword = (!string.IsNullOrWhiteSpace(user.PasswordHash)),
+                PhoneNumber = !string.IsNullOrWhiteSpace(user.PhoneNumber) ? user.PhoneNumber : null,
                 TwoFactor = user.TwoFactorEnabled,
-                Logins = await userManager.GetLoginsAsync(user),
-                BrowserRemembered = await signInManager.IsTwoFactorClientRememberedAsync(user),
+                Logins = await UserManager.GetLoginsAsync(user),
+                BrowserRemembered = await SignInManager.IsTwoFactorClientRememberedAsync(user),
                 TimeZone = user.TimeZoneId
                 
             };
 
             if(string.IsNullOrEmpty(model.TimeZone))
             {
-                model.TimeZone = await timeZoneIdResolver.GetSiteTimeZoneId();
+                model.TimeZone = await TimeZoneIdResolver.GetSiteTimeZoneId();
             }
             
             return View(model);
@@ -97,16 +94,17 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> TimeZone()
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
 
-            var model = new TimeZoneViewModel();
-
-            model.TimeZoneId = user.TimeZoneId;
+            var model = new TimeZoneViewModel
+            {
+                TimeZoneId = user.TimeZoneId
+            };
             if (string.IsNullOrEmpty(model.TimeZoneId))
             {
-                model.TimeZoneId = await timeZoneIdResolver.GetSiteTimeZoneId();
+                model.TimeZoneId = await TimeZoneIdResolver.GetSiteTimeZoneId();
             }
-            model.AllTimeZones = tzHelper.GetTimeZoneList().Select(x =>
+            model.AllTimeZones = TimeZoneHelper.GetTimeZoneList().Select(x =>
                            new SelectListItem
                            {
                                Text = x,
@@ -121,13 +119,13 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> TimeZone(string timeZoneId)
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
 
             if (user != null)
             {
                 user.TimeZoneId = timeZoneId;
-                await userManager.UpdateAsync(user);
-                this.AlertSuccess(sr["Your time zone has been updated."]);
+                await UserManager.UpdateAsync(user);
+                this.AlertSuccess(StringLocalizer["Your time zone has been updated."]);
             }
             return RedirectToAction("Index");
         }
@@ -135,7 +133,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> UserInfo()
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
             var model = new UserInfoViewModel
             {
                 FirstName = user.FirstName,
@@ -145,9 +143,9 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 PhoneNumber = user.PhoneNumber
             };
 
-            var viewName = await customUserInfo.GetUserInfoViewName(Site, user, HttpContext);
-            await customUserInfo.HandleUserInfoGet(
-                Site,
+            var viewName = await CustomUserInfo.GetUserInfoViewName(CurrentSite, user, HttpContext);
+            await CustomUserInfo.HandleUserInfoGet(
+                CurrentSite,
                 user,
                 model,
                 HttpContext,
@@ -160,12 +158,12 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UserInfo(UserInfoViewModel model)
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
-            var viewName = await customUserInfo.GetUserInfoViewName(Site, user, HttpContext);
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var viewName = await CustomUserInfo.GetUserInfoViewName(CurrentSite, user, HttpContext);
 
             bool isValid = ModelState.IsValid;
-            bool customDataIsValid = await customUserInfo.HandleUserInfoValidation(
-                Site,
+            bool customDataIsValid = await CustomUserInfo.HandleUserInfoValidation(
+                CurrentSite,
                 user,
                 model,
                 HttpContext,
@@ -190,19 +188,19 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 
                 user.WebSiteUrl = model.WebSiteUrl;
 
-                await customUserInfo.HandleUserInfoPostSuccess(
-                        Site,
+                await CustomUserInfo.HandleUserInfoPostSuccess(
+                        CurrentSite,
                         user,
                         model,
                         HttpContext
                         );
 
 
-                await userManager.UpdateAsync(user);
+                await UserManager.UpdateAsync(user);
 
                 
 
-                this.AlertSuccess(sr["Your information has been updated."]);
+                this.AlertSuccess(StringLocalizer["Your information has been updated."]);
             }
             return RedirectToAction("Index");
         }
@@ -212,9 +210,9 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> RemoveLogin()
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
-            var linkedAccounts = await userManager.GetLoginsAsync(user);
-            ViewData["ShowRemoveButton"] = await userManager.HasPasswordAsync(user) || linkedAccounts.Count > 1;
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var linkedAccounts = await UserManager.GetLoginsAsync(user);
+            ViewData["ShowRemoveButton"] = await UserManager.HasPasswordAsync(user) || linkedAccounts.Count > 1;
             return View(linkedAccounts);
         }
 
@@ -224,19 +222,19 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RemoveLogin(string loginProvider, string providerKey)
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
 
             if (user != null)
             {
-                var result = await userManager.RemoveLoginAsync(user, loginProvider, providerKey);
+                var result = await UserManager.RemoveLoginAsync(user, loginProvider, providerKey);
                 if (result.Succeeded)
                 {
-                    await signInManager.SignInAsync(user, isPersistent: false);
-                    this.AlertSuccess(sr["The external login was removed."]);
+                    await SignInManager.SignInAsync(user, isPersistent: false);
+                    this.AlertSuccess(StringLocalizer["The external login was removed."]);
                 }
                 else
                 {
-                    this.AlertDanger(sr["oops something went wrong, the external login was not removed, please try again."]);
+                    this.AlertDanger(StringLocalizer["oops something went wrong, the external login was not removed, please try again."]);
 
                 }
             }
@@ -246,50 +244,50 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
 
 
         // GET: /Manage/AddPhoneNumber
-        [HttpGet]
-        public IActionResult AddPhoneNumber()
-        {
-            return View();
-        }
+        //[HttpGet]
+        //public IActionResult AddPhoneNumber()
+        //{
+        //    return View();
+        //}
 
 
-        // POST: /Manage/AddPhoneNumber
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddPhoneNumber(AddPhoneNumberViewModel model)
-        {
-            if (!ModelState.IsValid)
-            {
-                return View(model);
-            }
-            // Generate the token and send it
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
-            var code = await userManager.GenerateChangePhoneNumberTokenAsync(user, model.Number);
-            await smsSender.SendSmsAsync(
-                Site, 
-                model.Number,
-                string.Format(sr["Your security code is: {0}"], code)
-                );
-            return RedirectToAction("VerifyPhoneNumber", new { PhoneNumber = model.Number });
+        //// POST: /Manage/AddPhoneNumber
+        //[HttpPost]
+        //[ValidateAntiForgeryToken]
+        //public async Task<IActionResult> AddPhoneNumber(AddPhoneNumberViewModel model)
+        //{
+        //    if (!ModelState.IsValid)
+        //    {
+        //        return View(model);
+        //    }
+        //    // Generate the token and send it
+        //    var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+        //    var code = await userManager.GenerateChangePhoneNumberTokenAsync(user, model.Number);
+        //    await smsSender.SendSmsAsync(
+        //        Site, 
+        //        model.Number,
+        //        string.Format(sr["Your security code is: {0}"], code)
+        //        );
+        //    return RedirectToAction("VerifyPhoneNumber", new { PhoneNumber = model.Number });
 
-        }
+        //}
 
         [HttpGet]
         public async Task<IActionResult> TwoFactorAuthentication()
         {
-            ViewData["Title"] = sr["Two-factor authentication"];
+            ViewData["Title"] = StringLocalizer["Two-factor authentication"];
 
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user == null)
             {
-                throw new ApplicationException($"Unable to load user with ID '{userManager.GetUserId(User)}'.");
+                throw new ApplicationException($"Unable to load user with ID '{UserManager.GetUserId(User)}'.");
             }
 
             var model = new TwoFactorAuthenticationViewModel
             {
-                HasAuthenticator = await userManager.GetAuthenticatorKeyAsync(user) != null,
+                HasAuthenticator = await UserManager.GetAuthenticatorKeyAsync(user) != null,
                 Is2faEnabled = user.TwoFactorEnabled,
-                RecoveryCodesLeft = await userManager.CountRecoveryCodesAsync(user),
+                RecoveryCodesLeft = await UserManager.CountRecoveryCodesAsync(user),
             };
 
             return View(model);
@@ -298,9 +296,9 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> Disable2faWarning()
         {
-            ViewData["Title"] = sr["Disable two-factor authentication (2FA)"];
+            ViewData["Title"] = StringLocalizer["Disable two-factor authentication (2FA)"];
 
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user == null)
             {
                 throw new ApplicationException($"Unable to load user with ID '{User.GetUserId()}'.");
@@ -318,40 +316,40 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Disable2fa()
         {
-            ViewData["Title"] = sr["Disable two-factor authentication (2FA)"];
+            ViewData["Title"] = StringLocalizer["Disable two-factor authentication (2FA)"];
 
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user == null)
             {
                 throw new ApplicationException($"Unable to load user with ID '{User.GetUserId()}'.");
             }
 
-            var disable2faResult = await userManager.SetTwoFactorEnabledAsync(user, false);
+            var disable2faResult = await UserManager.SetTwoFactorEnabledAsync(user, false);
             if (!disable2faResult.Succeeded)
             {
                 throw new ApplicationException($"Unexpected error occured disabling 2FA for user with ID '{user.Id}'.");
             }
             
-            _logger.LogInformation("User with ID {UserId} has disabled 2fa.", user.Id);
+            Log.LogInformation("User with ID {UserId} has disabled 2fa.", user.Id);
             return RedirectToAction(nameof(TwoFactorAuthentication));
         }
 
         [HttpGet]
         public async Task<IActionResult> EnableAuthenticator()
         {
-            ViewData["Title"] = sr["Enable authenticator"];
+            ViewData["Title"] = StringLocalizer["Enable authenticator"];
 
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user == null)
             {
                 throw new ApplicationException($"Unable to load user with ID '{User.GetUserId()}'.");
             }
 
-            var unformattedKey = await userManager.GetAuthenticatorKeyAsync(user);
+            var unformattedKey = await UserManager.GetAuthenticatorKeyAsync(user);
             if (string.IsNullOrEmpty(unformattedKey))
             {
-                await userManager.ResetAuthenticatorKeyAsync(user);
-                unformattedKey = await userManager.GetAuthenticatorKeyAsync(user);
+                await UserManager.ResetAuthenticatorKeyAsync(user);
+                unformattedKey = await UserManager.GetAuthenticatorKeyAsync(user);
             }
 
             var model = new EnableAuthenticatorViewModel
@@ -367,14 +365,14 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EnableAuthenticator(EnableAuthenticatorViewModel model)
         {
-            ViewData["Title"] = sr["Enable authenticator"];
+            ViewData["Title"] = StringLocalizer["Enable authenticator"];
 
             if (!ModelState.IsValid)
             {
                 return View(model);
             }
 
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user == null)
             {
                 throw new ApplicationException($"Unable to load user with ID '{User.GetUserId()}'.");
@@ -383,8 +381,8 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             // Strip spaces and hypens
             var verificationCode = model.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
 
-            var is2faTokenValid = await userManager.VerifyTwoFactorTokenAsync(
-                user, userManager.Options.Tokens.AuthenticatorTokenProvider, verificationCode);
+            var is2faTokenValid = await UserManager.VerifyTwoFactorTokenAsync(
+                user, UserManager.Options.Tokens.AuthenticatorTokenProvider, verificationCode);
 
             if (!is2faTokenValid)
             {
@@ -392,15 +390,15 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 return View(model);
             }
 
-            await userManager.SetTwoFactorEnabledAsync(user, true);
-            _logger.LogInformation("User with ID {UserId} has enabled 2FA with an authenticator app.", user.Id);
+            await UserManager.SetTwoFactorEnabledAsync(user, true);
+            Log.LogInformation("User with ID {UserId} has enabled 2FA with an authenticator app.", user.Id);
             return RedirectToAction(nameof(GenerateRecoveryCodes));
         }
 
         [HttpGet]
         public IActionResult ResetAuthenticatorWarning()
         {
-            ViewData["Title"] = sr["Reset authenticator key"];
+            ViewData["Title"] = StringLocalizer["Reset authenticator key"];
 
             return View(nameof(ResetAuthenticator));
         }
@@ -409,17 +407,17 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ResetAuthenticator()
         {
-            ViewData["Title"] = sr["Reset authenticator key"];
+            ViewData["Title"] = StringLocalizer["Reset authenticator key"];
 
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user == null)
             {
                 throw new ApplicationException($"Unable to load user with ID '{User.GetUserId()}'.");
             }
 
-            await userManager.SetTwoFactorEnabledAsync(user, false);
-            await userManager.ResetAuthenticatorKeyAsync(user);
-            _logger.LogInformation("User with id '{UserId}' has reset their authentication app key.", user.Id);
+            await UserManager.SetTwoFactorEnabledAsync(user, false);
+            await UserManager.ResetAuthenticatorKeyAsync(user);
+            Log.LogInformation("User with id '{UserId}' has reset their authentication app key.", user.Id);
 
             return RedirectToAction(nameof(EnableAuthenticator));
         }
@@ -427,9 +425,9 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> GenerateRecoveryCodes()
         {
-            ViewData["Title"] = sr["Recovery codes"];
+            ViewData["Title"] = StringLocalizer["Recovery codes"];
 
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user == null)
             {
                 throw new ApplicationException($"Unable to load user with ID '{User.GetUserId()}'.");
@@ -440,10 +438,10 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 throw new ApplicationException($"Cannot generate recovery codes for user with ID '{user.Id}' as they do not have 2FA enabled.");
             }
 
-            var recoveryCodes = await userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+            var recoveryCodes = await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
             var model = new GenerateRecoveryCodesViewModel { RecoveryCodes = recoveryCodes.ToArray() };
 
-            _logger.LogInformation("User with ID {UserId} has generated new 2FA recovery codes.", user.Id);
+            Log.LogInformation("User with ID {UserId} has generated new 2FA recovery codes.", user.Id);
 
             return View(model);
         }
@@ -454,11 +452,11 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EnableTwoFactorAuthentication()
         {
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user != null)
             {
-                await userManager.SetTwoFactorEnabledAsync(user, true);
-                await signInManager.SignInAsync(user, isPersistent: false);
+                await UserManager.SetTwoFactorEnabledAsync(user, true);
+                await SignInManager.SignInAsync(user, isPersistent: false);
             }
             return RedirectToAction("Index", "Manage");
         }
@@ -469,72 +467,72 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DisableTwoFactorAuthentication()
         {
-            var user = await userManager.FindByIdAsync(User.GetUserId());
+            var user = await UserManager.FindByIdAsync(User.GetUserId());
             if (user != null)
             {
-                await userManager.SetTwoFactorEnabledAsync(user, false);
-                await signInManager.SignInAsync(user, isPersistent: false);
+                await UserManager.SetTwoFactorEnabledAsync(user, false);
+                await SignInManager.SignInAsync(user, isPersistent: false);
             }
             return RedirectToAction("Index", "Manage");
         }
 
 
         // GET: /Manage/VerifyPhoneNumber
-        [HttpGet]
-        public async Task<IActionResult> VerifyPhoneNumber(string phoneNumber)
-        {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
-            var code = await userManager.GenerateChangePhoneNumberTokenAsync(user, phoneNumber);
-            // Send an SMS to verify the phone number
-            return phoneNumber == null ? View("Error") : View(new VerifyPhoneNumberViewModel { PhoneNumber = phoneNumber });
-        }
+        //[HttpGet]
+        //public async Task<IActionResult> VerifyPhoneNumber(string phoneNumber)
+        //{
+        //    var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+        //    var code = await userManager.GenerateChangePhoneNumberTokenAsync(user, phoneNumber);
+        //    // Send an SMS to verify the phone number
+        //    return phoneNumber == null ? View("Error") : View(new VerifyPhoneNumberViewModel { PhoneNumber = phoneNumber });
+        //}
 
 
-        // POST: /Manage/VerifyPhoneNumber
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> VerifyPhoneNumber(VerifyPhoneNumberViewModel model)
-        {
-            if (!ModelState.IsValid)
-            {
-                return View(model);
-            }
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
-            if (user != null)
-            {
-                var result = await userManager.ChangePhoneNumberAsync(user, model.PhoneNumber, model.Code);
-                if (result.Succeeded)
-                {
-                    await signInManager.SignInAsync(user, isPersistent: false);
+        //// POST: /Manage/VerifyPhoneNumber
+        //[HttpPost]
+        //[ValidateAntiForgeryToken]
+        //public async Task<IActionResult> VerifyPhoneNumber(VerifyPhoneNumberViewModel model)
+        //{
+        //    if (!ModelState.IsValid)
+        //    {
+        //        return View(model);
+        //    }
+        //    var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+        //    if (user != null)
+        //    {
+        //        var result = await userManager.ChangePhoneNumberAsync(user, model.PhoneNumber, model.Code);
+        //        if (result.Succeeded)
+        //        {
+        //            await signInManager.SignInAsync(user, isPersistent: false);
 
-                    this.AlertSuccess(sr["Your phone number was added."]);
+        //            this.AlertSuccess(sr["Your phone number was added."]);
 
-                    return RedirectToAction("Index");
-                }
-            }
-            // If we got this far, something failed, redisplay the form
-            ModelState.AddModelError(string.Empty, sr["Failed to verify phone number"]);
-            return View(model);
+        //            return RedirectToAction("Index");
+        //        }
+        //    }
+        //    // If we got this far, something failed, redisplay the form
+        //    ModelState.AddModelError(string.Empty, sr["Failed to verify phone number"]);
+        //    return View(model);
 
-        }
+        //}
 
         //
         // GET: /Manage/RemovePhoneNumber
         [HttpGet]
         public async Task<IActionResult> RemovePhoneNumber()
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
             if (user != null)
             {
-                var result = await userManager.SetPhoneNumberAsync(user, null);
+                var result = await UserManager.SetPhoneNumberAsync(user, null);
                 if (result.Succeeded)
                 {
-                    await signInManager.SignInAsync(user, isPersistent: false);
-                    this.AlertSuccess(sr["Your phone number was removed."]);
+                    await SignInManager.SignInAsync(user, isPersistent: false);
+                    this.AlertSuccess(StringLocalizer["Your phone number was removed."]);
                 }
                 else
                 {
-                    this.AlertDanger(sr["oops something went wrong please try again"]);
+                    this.AlertDanger(StringLocalizer["oops something went wrong please try again"]);
                 }
             }
             return RedirectToAction("Index");
@@ -558,20 +556,20 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             {
                 return View(model);
             }
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
             if (user != null)
             {
-                var result = await userManager.ChangePasswordAsync(user, model.OldPassword, model.NewPassword);
+                var result = await UserManager.ChangePasswordAsync(user, model.OldPassword, model.NewPassword);
                 if (result.Succeeded)
                 {
-                    await signInManager.SignInAsync(user, isPersistent: false);
+                    await SignInManager.SignInAsync(user, isPersistent: false);
 
-                    this.AlertSuccess(sr["Your password has been changed."]);
+                    this.AlertSuccess(StringLocalizer["Your password has been changed."]);
                     return RedirectToAction("Index");
                 }
                 else
                 {
-                    this.AlertDanger(sr["oops something went wrong please try again"]);
+                    this.AlertDanger(StringLocalizer["oops something went wrong please try again"]);
                 }
                 AddErrors(result);
             }
@@ -599,20 +597,20 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 return View(model);
             }
 
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
             if (user != null)
             {
-                var result = await userManager.AddPasswordAsync(user, model.NewPassword);
+                var result = await UserManager.AddPasswordAsync(user, model.NewPassword);
                 if (result.Succeeded)
                 {
-                    await signInManager.SignInAsync(user, isPersistent: false);
-                    this.AlertSuccess(sr["Your password has been set."]);
+                    await SignInManager.SignInAsync(user, isPersistent: false);
+                    this.AlertSuccess(StringLocalizer["Your password has been set."]);
 
                     return RedirectToAction("Index");
                 }
                 else
                 {
-                    this.AlertDanger(sr["oops something went wrong please try again"]);
+                    this.AlertDanger(StringLocalizer["oops something went wrong please try again"]);
                 }
 
                 AddErrors(result);
@@ -627,18 +625,18 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> ManageLogins()
         {
-            if(!Site.HasAnySocialAuthEnabled())
+            if(!CurrentSite.HasAnySocialAuthEnabled())
             {
                 return RedirectToAction("Index");
             }
 
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
             if (user == null)
             {
                 return View("Error");
             }
-            var userLogins = await userManager.GetLoginsAsync(user);
-            var externalSchemes = await signInManager.GetExternalAuthenticationSchemesAsync();
+            var userLogins = await UserManager.GetLoginsAsync(user);
+            var externalSchemes = await SignInManager.GetExternalAuthenticationSchemesAsync();
             var otherLogins = externalSchemes.Where(auth => userLogins.All(ul => auth.Name != ul.LoginProvider)).ToList();
             
             var model = new ManageLoginsViewModel
@@ -647,7 +645,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 OtherLogins = otherLogins
 
             };
-            model.ShowRemoveButton = await userManager.HasPasswordAsync(user) || model.CurrentLogins.Count > 1;
+            model.ShowRemoveButton = await UserManager.HasPasswordAsync(user) || model.CurrentLogins.Count > 1;
 
             return View(model);  
         }
@@ -660,7 +658,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         {
             // Request a redirect to the external login provider to link a login for the current user
             var redirectUrl = Url.Action("LinkLoginCallback", "Manage");
-            var properties = signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl, User.GetUserId());
+            var properties = SignInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl, User.GetUserId());
             return new ChallengeResult(provider, properties);
         }
 
@@ -669,21 +667,21 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpGet]
         public async Task<IActionResult> LinkLoginCallback()
         {
-            var user = await userManager.FindByIdAsync(HttpContext.User.GetUserId());
+            var user = await UserManager.FindByIdAsync(HttpContext.User.GetUserId());
             if (user == null)
             {
                 return View("Error");
             }
-            var info = await signInManager.GetExternalLoginInfoAsync(User.GetUserId());
+            var info = await SignInManager.GetExternalLoginInfoAsync(User.GetUserId());
             if (info == null)
             {
-                this.AlertDanger(sr["oops something went wrong please try again"]);
+                this.AlertDanger(StringLocalizer["oops something went wrong please try again"]);
                 return RedirectToAction("ManageLogins");
             }
-            var result = await userManager.AddLoginAsync(user, info);
+            var result = await UserManager.AddLoginAsync(user, info);
             if (!result.Succeeded)
             {
-                this.AlertDanger(sr["oops something went wrong, please try again"]);
+                this.AlertDanger(StringLocalizer["oops something went wrong, please try again"]);
             }
 
             return RedirectToAction("ManageLogins");
@@ -713,8 +711,8 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         {
             return string.Format(
                 AuthenicatorUriFormat,
-                _urlEncoder.Encode(userManager.Site.SiteName),
-                _urlEncoder.Encode(email),
+                UrlEncoder.Encode(UserManager.Site.SiteName),
+                UrlEncoder.Encode(email),
                 unformattedKey);
         }
 

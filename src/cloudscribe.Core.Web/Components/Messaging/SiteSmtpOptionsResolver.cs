@@ -1,5 +1,5 @@
 ﻿using cloudscribe.Core.Models;
-using cloudscribe.Messaging.Email.Smtp;
+using cloudscribe.Email.Smtp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
@@ -10,26 +10,26 @@ namespace cloudscribe.Core.Web.Components.Messaging
     public class SiteSmtpOptionsResolver : ConfigSmtpOptionsProvider
     {
         public SiteSmtpOptionsResolver(
-            SiteManager siteManager,
+            ISiteContextResolver siteResolver,
             ILogger<SiteSmtpOptionsResolver> logger,
             IOptions<SmtpOptions> smtpOptionsAccessor
             ):base(smtpOptionsAccessor)
         {
-            _siteManager = siteManager;
+            _siteResolver = siteResolver;
             _log = logger;
         }
 
-        private SiteManager _siteManager;
+        private ISiteContextResolver _siteResolver;
         private ILogger _log;
         
         public override async Task<SmtpOptions> GetSmtpOptions(string lookupKey = null)
         {
-            ISiteSettings currentSite = null;
+            ISiteContext currentSite = null;
             if (!string.IsNullOrWhiteSpace(lookupKey) && lookupKey.Length == 36)
             {
                 try
                 {
-                    currentSite = await _siteManager.Fetch(new Guid(lookupKey));
+                    currentSite = await _siteResolver.GetById(new Guid(lookupKey));
                     if (currentSite != null)
                     {
                         if (string.IsNullOrEmpty(currentSite.SmtpServer)) { return await base.GetSmtpOptions(lookupKey); }
