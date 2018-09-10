@@ -1,4 +1,9 @@
 
+https://www.blog.google/products/marketingplatform/analytics/this-is-not-a-test-google-optimize-now-free-for-everyone/
+
+https://www.smashingmagazine.com/2018/07/logging-activity-web-beacon-api/
+
+
 https://philipwalton.com/articles/the-google-analytics-setup-i-use-on-every-site-i-build/
 
 https://github.com/googleanalytics/autotrack

@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. 
 // Author:                  Joe Audette
 // Created:                 2017-02-15
-// Last Modified:           2017-05-14
+// Last Modified:           2018-07-18
 // 
 
 using cloudscribe.FileManager.Web.Models;
@@ -30,27 +30,27 @@ namespace cloudscribe.FileManager.Web.Services
             ILogger<FileManagerService> logger
             )
         {
-            this.mediaPathResolver = mediaPathResolver;
-            this.imageResizer = imageResizer;
-            nameRules = fileManagerNameRules;
-            icons = iconsAccessor.Value;
-            sr = stringLocalizer;
-            log = logger;
+            _mediaPathResolver = mediaPathResolver;
+            _imageResizer = imageResizer;
+            _nameRules = fileManagerNameRules;
+            _icons = iconsAccessor.Value;
+            _sr = stringLocalizer;
+            _log = logger;
         }
 
-        private IImageResizer imageResizer;
-        private IMediaPathResolver mediaPathResolver;
-        private MediaRootPathInfo rootPath;
-        private FileManagerIcons icons;
-        private IFileManagerNameRules nameRules;
-        private IStringLocalizer<FileManagerStringResources> sr;
-        private ILogger log;
+        private IImageResizer _imageResizer;
+        private IMediaPathResolver _mediaPathResolver;
+        private MediaRootPathInfo _rootPath;
+        private FileManagerIcons _icons;
+        private IFileManagerNameRules _nameRules;
+        private IStringLocalizer<FileManagerStringResources> _sr;
+        private ILogger _log;
 
         private async Task EnsureProjectSettings()
         {
-            if (rootPath != null) { return; }
-            rootPath = await mediaPathResolver.Resolve().ConfigureAwait(false);
-            if (rootPath != null) { return; }
+            if (_rootPath != null) { return; }
+            _rootPath = await _mediaPathResolver.Resolve().ConfigureAwait(false);
+            if (_rootPath != null) { return; }
         }
 
         private void EnsureSubFolders(string basePath, string[] segments)
@@ -92,10 +92,284 @@ namespace cloudscribe.FileManager.Web.Services
             return options.WebSizeImageMaxWidth;
         }
 
+        public async Task<UploadResult> CropFile(
+            ImageProcessingOptions options,
+            string sourceFilePath,
+            int offsetX,
+            int offsetY,
+            int widthToCrop,
+            int heightToCrop,
+            int finalWidth,
+            int finalHeight
+            )
+        {
+            if(string.IsNullOrWhiteSpace(sourceFilePath))
+            {
+                _log.LogError($"sourceFilePath not provided for crop");
+                return new UploadResult
+                {
+                    ErrorMessage = _sr["There was an error logged during file processing"]
+                };
+            }
+
+            await EnsureProjectSettings().ConfigureAwait(false);
+
+            string currentFsPath = _rootPath.RootFileSystemPath;
+            string currentVirtualPath = _rootPath.RootVirtualPath;
+            string[] virtualSegments = options.ImageDefaultVirtualSubPath.Split('/');
+
+            if (!sourceFilePath.StartsWith(_rootPath.RootVirtualPath))
+            {
+                _log.LogError($"{sourceFilePath} not a sub path of root path {_rootPath.RootVirtualPath}");
+                return new UploadResult
+                {
+                    ErrorMessage = _sr["There was an error logged during file processing"]
+                };
+            }
+
+            var fileToCropName = Path.GetFileName(sourceFilePath);
+            var fileToCropNameWithooutExtenstion = Path.GetFileNameWithoutExtension(sourceFilePath);
+            var ext = Path.GetExtension(sourceFilePath);
+            var mimeType = GetMimeType(ext);
+            var isImage = IsWebImageFile(ext);
+            if(!isImage)
+            {
+                _log.LogError($"{sourceFilePath} is not not an image file");
+                return new UploadResult
+                {
+                    ErrorMessage = _sr["There was an error logged during file processing"]
+                };
+            }
+
+            var fileToCropFolderVPath = sourceFilePath.Replace(fileToCropName, "");
+
+            var virtualSubPath = fileToCropFolderVPath.Substring(_rootPath.RootVirtualPath.Length);
+            var segments = virtualSubPath.Split('/');
+
+            if(segments.Length <= 0)
+            {
+                _log.LogError($"{sourceFilePath} not found");
+                return new UploadResult
+                {
+                    ErrorMessage = _sr["There was an error logged during file processing"]
+
+                };
+            }
+            
+            var requestedFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments));
+            if (!Directory.Exists(requestedFsPath))
+            {
+                _log.LogError("directory not found for currentPath " + requestedFsPath);
+                return new UploadResult
+                {
+                    ErrorMessage = _sr["There was an error logged during file processing"]
+
+                };
+            }
+            
+            currentVirtualPath = virtualSubPath;
+            virtualSegments = segments;
+            currentFsPath = Path.Combine(currentFsPath, Path.Combine(virtualSegments));
+            var sourceFsPath = Path.Combine(currentFsPath, fileToCropName);
+            var cropNameSegment = "-crop";
+            int previousCropCount = 0;
+            var targetFsPath = Path.Combine(currentFsPath, fileToCropNameWithooutExtenstion + cropNameSegment + ext);
+            while(File.Exists(targetFsPath))
+            {
+                previousCropCount += 1;
+                targetFsPath = Path.Combine(currentFsPath, fileToCropNameWithooutExtenstion + cropNameSegment + previousCropCount.ToString() + ext);
+            };
+            
+            var didCrop = _imageResizer.CropExistingImage(
+                sourceFsPath,
+                targetFsPath,
+                offsetX,
+                offsetY,
+                widthToCrop,
+                heightToCrop,
+                finalWidth,
+                finalHeight
+                );
+
+            if(!didCrop)
+            {
+                _log.LogError($"failed to crop image {requestedFsPath}");
+                return new UploadResult
+                {
+                    ErrorMessage = _sr["There was an error logged during file processing"]
+
+                };
+            }
+            
+            return new UploadResult
+            {
+                OriginalUrl = sourceFilePath,
+                ResizedUrl = currentVirtualPath + Path.GetFileName(targetFsPath)
+            };
+
+        }
+
+        public async Task<UploadResult> ProcessFile(
+            IFormFile formFile,
+            ImageProcessingOptions options,
+            bool? resizeImages,
+            int? maxWidth,
+            int? maxHeight,
+            string requestedVirtualPath = "",
+            string newFileName = "",
+            bool allowRootPath = true,
+            bool createThumbnail = false,
+            bool? keepOriginal = null
+            )
+        {
+            await EnsureProjectSettings().ConfigureAwait(false);
+
+            string currentFsPath = _rootPath.RootFileSystemPath;
+            string currentVirtualPath = _rootPath.RootVirtualPath;
+            string[] virtualSegments = options.ImageDefaultVirtualSubPath.Split('/');
+            bool doResize = resizeImages ?? options.AutoResize;
+
+            if ((!string.IsNullOrEmpty(requestedVirtualPath)) && (requestedVirtualPath.StartsWith(_rootPath.RootVirtualPath)))
+            {
+                var virtualSubPath = requestedVirtualPath.Substring(_rootPath.RootVirtualPath.Length);
+                var segments = virtualSubPath.Split('/');
+                if (segments.Length > 0)
+                {
+                    var requestedFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments));
+                    if (!Directory.Exists(requestedFsPath))
+                    {
+                        //_log.LogError("directory not found for currentPath " + requestedFsPath);
+                        // user has file system permission and could manually create the needed folder so auto ensure
+                        // since it is a sub path of the root
+                        EnsureSubFolders(_rootPath.RootFileSystemPath, segments);
+                    }
+                    
+                    currentVirtualPath = requestedVirtualPath;
+                    virtualSegments = segments;
+                    currentFsPath = Path.Combine(currentFsPath, Path.Combine(virtualSegments));   
+                }
+            }
+            else
+            {
+
+                // ensure the folders if no currentDir provided,
+                // if it is provided it must be an existing path
+                // options.ImageDefaultVirtualSubPath might not exist on first upload so need to ensure it
+                if (!allowRootPath)
+                {
+                    currentVirtualPath = currentVirtualPath + options.ImageDefaultVirtualSubPath;
+                    currentFsPath = Path.Combine(currentFsPath, Path.Combine(virtualSegments));
+                    EnsureSubFolders(_rootPath.RootFileSystemPath, virtualSegments);
+                }
+
+            }
+            string newName;
+            if (!string.IsNullOrEmpty(newFileName))
+            {
+                newName = _nameRules.GetCleanFileName(newFileName);
+            }
+            else
+            {
+                newName = _nameRules.GetCleanFileName(Path.GetFileName(formFile.FileName));
+            }
+
+            var newUrl = currentVirtualPath + "/" + newName;
+            var fsPath = Path.Combine(currentFsPath, newName);
+
+            var ext = Path.GetExtension(newName);
+            var webSizeName = Path.GetFileNameWithoutExtension(newName) + "-ws" + ext;
+
+            string webUrl = currentVirtualPath + "/" + webSizeName;
+
+            var thumbSizeName = Path.GetFileNameWithoutExtension(newName) + "-thumb" + ext;
+            string thumbUrl = currentVirtualPath + "/" + thumbSizeName;
+
+            var didResize = false;
+            var didCreateThumb = false;
+
+            try
+            {
+                using (var stream = new FileStream(fsPath, FileMode.Create))
+                {
+                    await formFile.CopyToAsync(stream);
+                }
+                var mimeType = GetMimeType(ext);
+
+                if ((doResize) && IsWebImageFile(ext))
+                {
+                    int resizeWidth = GetMaxWidth(maxWidth, options);
+                    int resizeHeight = GetMaxWidth(maxHeight, options);
+
+                    didResize = _imageResizer.ResizeImage(
+                        fsPath,
+                        currentFsPath,
+                        webSizeName,
+                        mimeType,
+                        resizeWidth,
+                        resizeHeight,
+                        options.AllowEnlargement,
+                        options.ResizeQuality
+                        );
+                }
+
+                if (createThumbnail)
+                {
+                    didCreateThumb = _imageResizer.ResizeImage(
+                        fsPath,
+                        currentFsPath,
+                        thumbSizeName,
+                        mimeType,
+                        options.ThumbnailImageMaxWidth,
+                        options.ThumbnailImageMaxHeight,
+                        false,
+                        options.ResizeQuality
+                        );
+                }
+                if(didResize)
+                {
+                    if (keepOriginal.HasValue)
+                    {
+                        if (keepOriginal.Value == false)
+                        {
+                            File.Delete(fsPath);
+                            newUrl = string.Empty;
+                        }
+                    }
+                    else if (!options.KeepOriginalImages) // use default if not explcitely passed
+                    {
+                        File.Delete(fsPath);
+                        newUrl = string.Empty;
+                    }
+                }
+                
+            }
+            catch (Exception ex)
+            {
+                _log.LogError($"{ex.Message}:{ex.StackTrace}");
+
+                return new UploadResult
+                {
+                    ErrorMessage = _sr["There was an error logged during file processing"]
+
+                };
+            }
+
+            return new UploadResult
+            {
+                OriginalUrl = newUrl,
+                ResizedUrl = didResize ? webUrl : string.Empty,
+                ThumbUrl = didCreateThumb ? thumbUrl : string.Empty,
+                Name = newName,
+                Length = formFile.Length,
+                Type = formFile.ContentType
+
+            };
+        }
+
         public async Task<string> GetRootVirtualPath()
         {
             await EnsureProjectSettings().ConfigureAwait(false);
-            return rootPath.RootVirtualPath;
+            return _rootPath.RootVirtualPath;
         }
 
         public async Task<OperationResult> CreateFolder(string requestedVirtualPath, string folderName)
@@ -105,56 +379,60 @@ namespace cloudscribe.FileManager.Web.Services
             if (string.IsNullOrEmpty(folderName))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Folder name not provided"];
+                result.Message = _sr["Folder name not provided"];
+                _log.LogWarning($"CreateFolder: Folder name not provided");
                 return result;
             }
 
             await EnsureProjectSettings().ConfigureAwait(false);
             if (string.IsNullOrEmpty(requestedVirtualPath))
             {
-                requestedVirtualPath = rootPath.RootVirtualPath;
+                requestedVirtualPath = _rootPath.RootVirtualPath;
             }
 
-            var isRoot = (requestedVirtualPath == rootPath.RootVirtualPath);
+            var isRoot = (requestedVirtualPath == _rootPath.RootVirtualPath);
             string requestedFsPath;
 
             if (!isRoot)
             {
-                if (!requestedVirtualPath.StartsWith(rootPath.RootVirtualPath))
+                if (!requestedVirtualPath.StartsWith(_rootPath.RootVirtualPath))
                 {
                     result = new OperationResult(false);
-                    result.Message = sr["Invalid path"];
+                    result.Message = _sr["Invalid path"];
+                    _log.LogWarning($"CreateFolder: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                     return result;
                 }
 
-                var virtualSubPath = requestedVirtualPath.Substring(rootPath.RootVirtualPath.Length);
+                var virtualSubPath = requestedVirtualPath.Substring(_rootPath.RootVirtualPath.Length);
                 var segments = virtualSubPath.Split('/');
                 if (segments.Length > 0)
                 {
-                    requestedFsPath = Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments));
+                    requestedFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments));
                     if (!Directory.Exists(requestedFsPath))
                     {
                         result = new OperationResult(false);
-                        result.Message = sr["Invalid path"];
+                        result.Message = _sr["Invalid path"];
+                        _log.LogWarning($"CreateFolder: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                         return result;
                     }
 
                 }
                 else
                 {
-                    requestedFsPath = rootPath.RootFileSystemPath;
+                    requestedFsPath = _rootPath.RootFileSystemPath;
                 }
             }
             else
             {
-                requestedFsPath = rootPath.RootFileSystemPath;
+                requestedFsPath = _rootPath.RootFileSystemPath;
             }
             
-            var newFolderFsPath = Path.Combine(requestedFsPath, nameRules.GetCleanFolderName(folderName));
+            var newFolderFsPath = Path.Combine(requestedFsPath, _nameRules.GetCleanFolderName(folderName));
             if (Directory.Exists(newFolderFsPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Folder already exists"];
+                result.Message = _sr["Folder already exists"];
+                _log.LogWarning($"CreateFolder: {requestedVirtualPath} already exists");
                 return result;
             }
 
@@ -166,9 +444,9 @@ namespace cloudscribe.FileManager.Web.Services
             }
             catch(IOException ex)
             {
-                log.LogError(MediaLoggingEvents.FOLDER_CREATION, ex, ex.Message + " " + ex.StackTrace);
+                _log.LogError(MediaLoggingEvents.FOLDER_CREATION, ex, ex.Message + " " + ex.StackTrace);
                 result = new OperationResult(false);
-                result.Message = sr["Server error"];
+                result.Message = _sr["Server error"];
                 return result;
             }
 
@@ -180,35 +458,38 @@ namespace cloudscribe.FileManager.Web.Services
             if (string.IsNullOrEmpty(requestedVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Path not provided"];
+                result.Message = _sr["Path not provided"];
                 return result;
             }
 
             await EnsureProjectSettings().ConfigureAwait(false);
 
-            if (!requestedVirtualPath.StartsWith(rootPath.RootVirtualPath))
+            if (!requestedVirtualPath.StartsWith(_rootPath.RootVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"DeleteFolder: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var virtualSubPath = requestedVirtualPath.Substring(rootPath.RootVirtualPath.Length);
+            var virtualSubPath = requestedVirtualPath.Substring(_rootPath.RootVirtualPath.Length);
             var segments = virtualSubPath.Split('/');
 
             if (segments.Length == 0)
             { 
                 // don't allow delete the root folder
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"DeleteFolder: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var requestedFsPath = Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments));
+            var requestedFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments));
             if (!Directory.Exists(requestedFsPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"DeleteFolder: {requestedVirtualPath} does not exist");
                 return result;
             }
 
@@ -220,9 +501,9 @@ namespace cloudscribe.FileManager.Web.Services
             }
             catch (IOException ex)
             {
-                log.LogError(MediaLoggingEvents.FOLDER_DELETE, ex, ex.Message + " " + ex.StackTrace);
+                _log.LogError(MediaLoggingEvents.FOLDER_DELETE, ex, ex.Message + " " + ex.StackTrace);
                 result = new OperationResult(false);
-                result.Message = sr["Server error"];
+                result.Message = _sr["Server error"];
                 return result;
             }
 
@@ -236,61 +517,64 @@ namespace cloudscribe.FileManager.Web.Services
             if (string.IsNullOrEmpty(requestedVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Path not provided"];
+                result.Message = _sr["Path not provided"];
                 return result;
             }
 
             if (string.IsNullOrEmpty(newNameSegment))
             {
                 result = new OperationResult(false);
-                result.Message = sr["New name not provided"];
+                result.Message = _sr["New name not provided"];
                 return result;
             }
 
             await EnsureProjectSettings().ConfigureAwait(false);
 
-            if (!requestedVirtualPath.StartsWith(rootPath.RootVirtualPath))
+            if (!requestedVirtualPath.StartsWith(_rootPath.RootVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"RenameFolder: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var virtualSubPath = requestedVirtualPath.Substring(rootPath.RootVirtualPath.Length);
+            var virtualSubPath = requestedVirtualPath.Substring(_rootPath.RootVirtualPath.Length);
             var segments = virtualSubPath.Split('/');
 
             if (segments.Length == 0)
             {
                 // don't allow delete the root folder
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"RenameFolder: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var currentFsPath = Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments));
+            var currentFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments));
             if (!Directory.Exists(currentFsPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
                 return result;
             }
             segments = segments.Take(segments.Count() - 1).ToArray();
-            var cleanFolderName = nameRules.GetCleanFolderName(newNameSegment);
+            var cleanFolderName = _nameRules.GetCleanFolderName(newNameSegment);
             string newFsPath;
             if (segments.Length > 0)
             {
-                newFsPath = Path.Combine(Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments)), cleanFolderName);
+                newFsPath = Path.Combine(Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments)), cleanFolderName);
             }
             else
             {
-                newFsPath = Path.Combine(rootPath.RootFileSystemPath, cleanFolderName);
+                newFsPath = Path.Combine(_rootPath.RootFileSystemPath, cleanFolderName);
             }
             
 
             if (Directory.Exists(newFsPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Directory already exists"];
+                result.Message = _sr["Directory already exists"];
+                _log.LogWarning($"RenameFolder: {requestedVirtualPath} already exists");
                 return result;
             }
 
@@ -303,9 +587,9 @@ namespace cloudscribe.FileManager.Web.Services
             }
             catch (IOException ex)
             {
-                log.LogError(MediaLoggingEvents.FOLDER_RENAME, ex, ex.Message + " " + ex.StackTrace);
+                _log.LogError(MediaLoggingEvents.FOLDER_RENAME, ex, ex.Message + " " + ex.StackTrace);
                 result = new OperationResult(false);
-                result.Message = sr["A error was logged while processing the request"];
+                result.Message = _sr["A error was logged while processing the request"];
                 return result;
             }
 
@@ -319,35 +603,39 @@ namespace cloudscribe.FileManager.Web.Services
             if (string.IsNullOrEmpty(requestedVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Path not provided"];
+                result.Message = _sr["Path not provided"];
+                _log.LogWarning("Delete File: virtual path not provided");
                 return result;
             }
 
             await EnsureProjectSettings().ConfigureAwait(false);
 
-            if (!requestedVirtualPath.StartsWith(rootPath.RootVirtualPath))
+            if (!requestedVirtualPath.StartsWith(_rootPath.RootVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"DeleteFile: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var virtualSubPath = requestedVirtualPath.Substring(rootPath.RootVirtualPath.Length);
+            var virtualSubPath = requestedVirtualPath.Substring(_rootPath.RootVirtualPath.Length);
             var segments = virtualSubPath.Split('/');
 
             if (segments.Length == 0)
             {
                 // no file just root folder url
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"DeleteFile: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var requestedFsPath = Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments));
+            var requestedFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments));
             if (!File.Exists(requestedFsPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"DeleteFile: {requestedVirtualPath} does not exist");
                 return result;
             }
 
@@ -359,9 +647,9 @@ namespace cloudscribe.FileManager.Web.Services
             }
             catch (IOException ex)
             {
-                log.LogError(MediaLoggingEvents.FILE_DELETE, ex, ex.Message + " " + ex.StackTrace);
+                _log.LogError(MediaLoggingEvents.FILE_DELETE, ex, ex.Message + " " + ex.StackTrace);
                 result = new OperationResult(false);
-                result.Message = sr["A error was logged while processing the request"];
+                result.Message = _sr["A error was logged while processing the request"];
                 return result;
             }
 
@@ -374,44 +662,47 @@ namespace cloudscribe.FileManager.Web.Services
             if (string.IsNullOrEmpty(requestedVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Path not provided"];
+                result.Message = _sr["Path not provided"];
                 return result;
             }
 
             if (string.IsNullOrEmpty(newNameSegment))
             {
                 result = new OperationResult(false);
-                result.Message = sr["New name not provided"];
+                result.Message = _sr["New name not provided"];
                 return result;
             }
 
             await EnsureProjectSettings().ConfigureAwait(false);
 
-            if (!requestedVirtualPath.StartsWith(rootPath.RootVirtualPath))
+            if (!requestedVirtualPath.StartsWith(_rootPath.RootVirtualPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"RenameFile: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var virtualSubPath = requestedVirtualPath.Substring(rootPath.RootVirtualPath.Length);
+            var virtualSubPath = requestedVirtualPath.Substring(_rootPath.RootVirtualPath.Length);
             var segments = virtualSubPath.Split('/');
 
             if (segments.Length == 0)
             {
                 // don't allow delete the root folder
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"RenameFile: {requestedVirtualPath} was not valid for root path {_rootPath.RootVirtualPath}");
                 return result;
             }
 
-            var currentFsPath = Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments));
+            var currentFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments));
             var ext = Path.GetExtension(currentFsPath);
 
             if (!File.Exists(currentFsPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Invalid path"];
+                result.Message = _sr["Invalid path"];
+                _log.LogWarning($"RenameFile: {requestedVirtualPath} does not exist");
                 return result;
             }
 
@@ -426,23 +717,23 @@ namespace cloudscribe.FileManager.Web.Services
             {
                 newNameSegment = Path.GetFileNameWithoutExtension(newNameSegment) + ext;
             }
-            var cleanFileName = nameRules.GetCleanFileName(newNameSegment);
+            var cleanFileName = _nameRules.GetCleanFileName(newNameSegment);
             
             string newFsPath;
             if (segments.Length > 0)
             {
-                newFsPath = Path.Combine(Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments)), cleanFileName);
+                newFsPath = Path.Combine(Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments)), cleanFileName);
             }
             else
             {
-                newFsPath = Path.Combine(rootPath.RootFileSystemPath, cleanFileName);
+                newFsPath = Path.Combine(_rootPath.RootFileSystemPath, cleanFileName);
             }
 
 
             if (File.Exists(newFsPath))
             {
                 result = new OperationResult(false);
-                result.Message = sr["Directory already exists"];
+                result.Message = _sr["Directory already exists"];
                 return result;
             }
 
@@ -455,9 +746,9 @@ namespace cloudscribe.FileManager.Web.Services
             }
             catch (IOException ex)
             {
-                log.LogError(MediaLoggingEvents.FOLDER_RENAME, ex, ex.Message + " " + ex.StackTrace);
+                _log.LogError(MediaLoggingEvents.FOLDER_RENAME, ex, ex.Message + " " + ex.StackTrace);
                 result = new OperationResult(false);
-                result.Message = sr["A error was logged while processing the request"];
+                result.Message = _sr["A error was logged while processing the request"];
                 return result;
             }
 
@@ -465,124 +756,7 @@ namespace cloudscribe.FileManager.Web.Services
 
         }
 
-        public async Task<UploadResult> ProcessFile(
-            IFormFile formFile,
-            ImageProcessingOptions options,
-            bool? resizeImages,
-            int? maxWidth,
-            int? maxHeight,
-            string requestedVirtualPath = "",
-            string newFileName = "",
-            bool allowRootPath = true
-            )
-        {
-            await EnsureProjectSettings().ConfigureAwait(false);
-
-            string currentFsPath = rootPath.RootFileSystemPath;
-            string currentVirtualPath = rootPath.RootVirtualPath;
-            string[] virtualSegments = options.ImageDefaultVirtualSubPath.Split('/');
-            bool doResize = resizeImages.HasValue ? resizeImages.Value : options.AutoResize;
-
-            if ((!string.IsNullOrEmpty(requestedVirtualPath)) && (requestedVirtualPath.StartsWith(rootPath.RootVirtualPath)))
-            {
-
-                var virtualSubPath = requestedVirtualPath.Substring(rootPath.RootVirtualPath.Length);
-                var segments = virtualSubPath.Split('/');
-                if(segments.Length > 0)
-                {
-                    var requestedFsPath = Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments));
-                    if (!Directory.Exists(requestedFsPath))
-                    {
-                        log.LogError("directory not found for currentPath " + requestedFsPath);
-                    }
-                    else
-                    {
-                        currentVirtualPath = requestedVirtualPath;
-                        virtualSegments = segments;
-                        currentFsPath = Path.Combine(currentFsPath, Path.Combine(virtualSegments));
-                    }
-                }    
-                
-            }
-            else
-            {
-
-                // only ensure the folders if no currentDir provided,
-                // if it is provided it must be an existing path
-                // options.ImageDefaultVirtualSubPath might not exist on first upload so need to ensure it
-                if(!allowRootPath)
-                {
-                    currentVirtualPath = currentVirtualPath + options.ImageDefaultVirtualSubPath;
-                    currentFsPath = Path.Combine(currentFsPath, Path.Combine(virtualSegments));
-                    EnsureSubFolders(rootPath.RootFileSystemPath, virtualSegments);
-                }
-                
-            }
-            string newName;
-            if (!string.IsNullOrEmpty(newFileName))
-            {
-                newName = nameRules.GetCleanFileName(newFileName);
-            }
-            else
-            {
-                newName = nameRules.GetCleanFileName(Path.GetFileName(formFile.FileName));
-            }
-            
-            var newUrl = currentVirtualPath + "/" + newName;
-            var fsPath = Path.Combine(currentFsPath, newName);
-
-            var ext = Path.GetExtension(newName);
-            var webSizeName = Path.GetFileNameWithoutExtension(newName) + "-ws" + ext;
-            var webFsPath = Path.Combine(currentFsPath, webSizeName);
-            string webUrl = string.Empty;
-            var didResize = false;
-
-            try
-            {
-                using (var stream = new FileStream(fsPath, FileMode.Create))
-                {
-                    await formFile.CopyToAsync(stream);
-                }
-
-                if ((doResize) && IsWebImageFile(ext))
-                {
-                    var mimeType = GetMimeType(ext);
-                    webUrl = currentVirtualPath + "/" + webSizeName;
-                    int resizeWidth = GetMaxWidth(maxWidth, options);
-                    int resizeHeight = GetMaxWidth(maxHeight, options);
-
-                    didResize = imageResizer.ResizeImage(
-                        fsPath,
-                        currentFsPath,
-                        webSizeName,
-                        mimeType,
-                        resizeWidth,
-                        resizeHeight,
-                        options.AllowEnlargement
-                        );
-                }
-
-                return new UploadResult
-                {
-                    OriginalUrl = newUrl,
-                    ResizedUrl = didResize? webUrl : string.Empty,
-                    Name = newName,
-                    Length = formFile.Length,
-                    Type = formFile.ContentType
-
-                };
-            }
-            catch (Exception ex)
-            {
-                log.LogError(MediaLoggingEvents.FILE_PROCCESSING, ex, ex.StackTrace);
-
-                return new UploadResult
-                {
-                    ErrorMessage = sr["There was an error logged during file processing"]
-
-                };
-            }
-        }
+        
 
 
         public async Task<List<Node>> GetFileTree(string fileType, string virtualStartPath)
@@ -591,31 +765,31 @@ namespace cloudscribe.FileManager.Web.Services
 
             var list = new List<Node>();
 
-            if(!Directory.Exists(rootPath.RootFileSystemPath)) 
+            if(!Directory.Exists(_rootPath.RootFileSystemPath)) 
             {
-                log.LogError("directory not found for RootFileSystemPath " + rootPath.RootFileSystemPath);
+                _log.LogError("directory not found for RootFileSystemPath " + _rootPath.RootFileSystemPath);
                 return list;
             }
 
             DirectoryInfo currentDirectory;
             IEnumerable<DirectoryInfo> folders;
             //bool isRoot = false;
-            string currentFsPath = rootPath.RootFileSystemPath;
-            string currentVirtualPath = rootPath.RootVirtualPath;
+            string currentFsPath = _rootPath.RootFileSystemPath;
+            string currentVirtualPath = _rootPath.RootVirtualPath;
 
             if (!string.IsNullOrEmpty(virtualStartPath))
             {
-                if(!virtualStartPath.StartsWith(rootPath.RootVirtualPath))
+                if(!virtualStartPath.StartsWith(_rootPath.RootVirtualPath))
                 {
-                    log.LogError("virtualStartPath did not start with RootFileSystemPath " + virtualStartPath);
+                    _log.LogError("virtualStartPath did not start with RootFileSystemPath " + virtualStartPath);
                     return list;
                 }
-                var virtualSubPath = virtualStartPath.Substring(rootPath.RootVirtualPath.Length);
+                var virtualSubPath = virtualStartPath.Substring(_rootPath.RootVirtualPath.Length);
                 var segments = virtualSubPath.Split('/');
-                currentFsPath = Path.Combine(rootPath.RootFileSystemPath, Path.Combine(segments)); 
+                currentFsPath = Path.Combine(_rootPath.RootFileSystemPath, Path.Combine(segments)); 
                 if(!Directory.Exists(currentFsPath))
                 {
-                    log.LogError("directory not found for currentPath " + currentFsPath);
+                    _log.LogError("directory not found for currentPath " + currentFsPath);
                     return list;
                 }
                 currentDirectory = new DirectoryInfo(currentFsPath);
@@ -624,7 +798,7 @@ namespace cloudscribe.FileManager.Web.Services
             else
             {
                 //isRoot = true;
-                currentDirectory = new DirectoryInfo(rootPath.RootFileSystemPath);
+                currentDirectory = new DirectoryInfo(_rootPath.RootFileSystemPath);
             }
             
             folders = from folder in currentDirectory.GetDirectories("*", SearchOption.TopDirectoryOnly)
@@ -640,8 +814,8 @@ namespace cloudscribe.FileManager.Web.Services
                 node.Id = node.VirtualPath; // TODO: maybe just use id
                 node.Created = folder.CreationTimeUtc;
                 node.Modified = folder.LastWriteTimeUtc;
-                node.Icon = icons.Folder;
-                node.ExpandedIcon = icons.FolderOpen;
+                node.Icon = _icons.Folder;
+                node.ExpandedIcon = _icons.FolderOpen;
                 node.LazyLoad = true;
                 list.Add(node);
             }
@@ -699,23 +873,23 @@ namespace cloudscribe.FileManager.Web.Services
             {
                 case "doc":
                 case "docx":
-                    return icons.FileWord;
+                    return _icons.FileWord;
 
                 case "xls":
                 case "xlsx":
-                    return icons.FileExcel;
+                    return _icons.FileExcel;
 
                 
                 case "ppt":
                 case "pptx":
-                    return icons.FilePowerpoint;
+                    return _icons.FilePowerpoint;
 
                 case "jpg":
                 case "jpeg":
                 case "gif":
                 case "png":
                 case "ico":
-                    return icons.FileImage;
+                    return _icons.FileImage;
 
                 case "wmv":
                 case "mpg":
@@ -727,32 +901,32 @@ namespace cloudscribe.FileManager.Web.Services
                 case "webm":
                 case "mov":
                 case "flv":
-                    return icons.FileVideo;
+                    return _icons.FileVideo;
 
 
                 case "mp3":
                 case "m4a":
                 case "oga":
                 case "spx":
-                    return icons.FileAudio;
+                    return _icons.FileAudio;
 
                
                 case "htm":
                 case "html":
                 case "css":
                 case "js":
-                    return icons.FileCode;
+                    return _icons.FileCode;
 
                 case "zip":
                 case "tar":
-                    return icons.FileArchive;
+                    return _icons.FileArchive;
 
                 case "pdf":
-                    return icons.FilePdf;
+                    return _icons.FilePdf;
 
 
                 default:
-                    return icons.File;
+                    return _icons.File;
 
             }
 

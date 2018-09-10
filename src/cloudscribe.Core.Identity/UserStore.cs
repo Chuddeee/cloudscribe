@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:					Joe Audette
 // Created:				    2014-07-22
-// Last Modified:		    2018-03-13
+// Last Modified:		    2018-06-21
 // 
 
 using cloudscribe.Core.Models;
@@ -180,16 +180,9 @@ namespace cloudscribe.Core.Identity
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
             _log.LogDebug("UpdateAsync"); 
-
-            if (SiteSettings.ReallyDeleteUsers)
-            {
-                await _commands.Delete(user.SiteId, user.Id, cancellationToken);
-            }
-            else
-            {
-                await _commands.FlagAsDeleted(user.SiteId, user.Id, cancellationToken);
-            }
-
+            
+            await _commands.Delete(user.SiteId, user.Id, cancellationToken);
+            
             return IdentityResult.Success;
         }
 
@@ -840,6 +833,10 @@ namespace cloudscribe.Core.Identity
                 cancellationToken.ThrowIfCancellationRequested();
                 await _commands.CreateClaim(userClaim, cancellationToken);
             }
+
+            // this is so the middleware will sign the user out and in again to get current claims
+            user.RolesChanged = true;
+            await _commands.Update(user);
             
 
         }
@@ -863,7 +860,11 @@ namespace cloudscribe.Core.Identity
                 cancellationToken.ThrowIfCancellationRequested();
                 await _commands.DeleteClaimByUser(siteGuid, user.Id, claim.Type, cancellationToken);
             }
-           
+
+            // this is so the middleware will sign the user out and in again to get current claims
+            user.RolesChanged = true;
+            await _commands.Update(user);
+
         }
 
         public async Task ReplaceClaimAsync(TUser user, Claim claim, Claim newClaim, CancellationToken cancellationToken)
@@ -891,6 +892,9 @@ namespace cloudscribe.Core.Identity
             };
             cancellationToken.ThrowIfCancellationRequested();
             await _commands.CreateClaim(userClaim, cancellationToken);
+            // this is so the middleware will sign the user out and in again to get current claims
+            user.RolesChanged = true;
+            await _commands.Update(user);
 
         }
 

@@ -1,4 +1,10 @@
 
+https://docs.microsoft.com/en-us/nuget/hosting-packages/local-feeds
+
+
+https://blog.nuget.org/20180522/Introducing-signed-package-submissions.html
+
+
 http://blog.nuget.org/20170417/Package-identity-and-trust.html
 https://github.com/NuGet/Home/issues/1882
 

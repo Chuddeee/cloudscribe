@@ -2,11 +2,12 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:					Joe Audette
 // Created:					2014-10-26
-// Last Modified:			2018-03-14
+// Last Modified:			2018-09-05
 // 
 
 using cloudscribe.Core.Models;
 using cloudscribe.Core.Web.Components;
+using cloudscribe.Core.Web.Components.Messaging;
 using cloudscribe.Core.Web.ViewModels.SiteSettings;
 using cloudscribe.Email;
 using cloudscribe.Web.Common;
@@ -26,7 +27,7 @@ using System.Threading.Tasks;
 
 namespace cloudscribe.Core.Web.Controllers.Mvc
 {
-    [Authorize(Policy = PolicyConstants.AdminPolicy)]
+    
     public class SiteAdminController : Controller
     {
         public SiteAdminController(
@@ -34,6 +35,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             GeoDataManager geoDataManager,
             ISiteAcountCapabilitiesProvider siteCapabilities,
             IEnumerable<IEmailSender> allEmailSenders,
+            ISiteMessageEmailSender messageSender,
             IOptions<MultiTenantOptions> multiTenantOptions,
             IOptions<UIOptions> uiOptionsAccessor,
             IThemeListBuilder layoutListBuilder,
@@ -54,6 +56,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             _siteCapabilities = siteCapabilities;
             _localization = localizationOptions.Value;
             _emailSenders = allEmailSenders;
+            _messageSender = messageSender;
         }
 
         private SiteManager _siteManager;
@@ -61,6 +64,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         private MultiTenantOptions _multiTenantOptions;
         private ISiteAcountCapabilitiesProvider _siteCapabilities;
         private IEnumerable<IEmailSender> _emailSenders;
+        private ISiteMessageEmailSender _messageSender;
 
 
         private IStringLocalizer _sr;
@@ -70,6 +74,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         private RequestLocalizationOptions _localization;
 
         // GET: /SiteAdmin
+        [Authorize(Policy = PolicyConstants.AdminMenuPolicy)]
         [HttpGet]
         public IActionResult Index()
         {
@@ -79,6 +84,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         }
 
         // GET: /SiteAdmin
+        [Authorize(Policy = PolicyConstants.AdminPolicy)]
         [HttpGet]
         public IActionResult Security()
         {
@@ -463,6 +469,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
 
         }
 
+        [Authorize(Policy = PolicyConstants.AdminPolicy)]
         [HttpPost]
         public async Task<JsonResult> AliasIdAvailable(Guid? siteId, string aliasId)
         {
@@ -472,6 +479,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             return Json(available);
         }
 
+        [Authorize(Policy = PolicyConstants.AdminPolicy)]
         [HttpPost]
         public async Task<JsonResult> FolderNameAvailable(Guid? siteId, string siteFolderName)
         {           
@@ -485,6 +493,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             return Json(available);
         }
 
+        [Authorize(Policy = PolicyConstants.AdminPolicy)]
         [HttpPost]
         public async Task<JsonResult> HostNameAvailable(Guid? siteId, string hostName)
         {
@@ -494,6 +503,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             return Json(available);
         }
 
+        
         [HttpGet]
         [Authorize(Policy = PolicyConstants.AdminPolicy)]
         public async Task<IActionResult> CompanyInfo(
@@ -628,7 +638,8 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             Guid? siteId,
             int slp = 1)
         {
-            var selectedSite = await _siteManager.GetSiteForEdit(siteId);
+            //var selectedSite = await _siteManager.GetSiteForEdit(siteId);
+            var selectedSite = await _siteManager.GetSiteForDataOperations(siteId);
             // only server admin site can edit other sites settings
             if (selectedSite.Id != _siteManager.CurrentSite.Id)
             {
@@ -662,6 +673,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             model.EmailSenderName = selectedSite.EmailSenderName;
             model.EmailApiEndpoint = selectedSite.EmailApiEndpoint;
             model.EmailApiKey = selectedSite.EmailApiKey;
+            model.TestMessage.Tenant = selectedSite;
 
             return View(model);
         }
@@ -698,6 +710,8 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                                   Selected = model.EmailSenderName == x.Name
                               }).ToList();
 
+                model.TestMessage.Tenant = selectedSite as ISiteContext;
+
                 return View(model);
             }
 
@@ -710,7 +724,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             selectedSite.DefaultEmailFromAddress = model.DefaultEmailFromAddress;
             selectedSite.DefaultEmailFromAlias = model.DefaultEmailFromAlias;
             selectedSite.SmtpPassword = model.SmtpPassword;
-            selectedSite.SmtpPort = model.SmtpPort;
+            selectedSite.SmtpPort = model.SmtpPort.Value;
             selectedSite.SmtpPreferredEncoding = model.SmtpPreferredEncoding;
             selectedSite.SmtpRequiresAuth = model.SmtpRequiresAuth;
             selectedSite.SmtpServer = model.SmtpServer;
@@ -731,6 +745,17 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             {
                 return RedirectToAction("MailSettings", new { siteId = model.SiteId });
             }
+
+            return RedirectToAction("MailSettings");
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Authorize(Policy = PolicyConstants.AdminPolicy)]
+        public async Task<ActionResult> SendTestMessage(SiteMessageModel model, Guid siteId)
+        {
+            var selectedSite = await _siteManager.GetSiteForDataOperations(siteId);
+            await _messageSender.SendSiteMessage(selectedSite, model, Request.GetCurrentBaseUrl());
 
             return RedirectToAction("MailSettings");
         }
@@ -761,7 +786,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         //    model.SmsFrom = selectedSite.SmsFrom;
         //    model.SmsClientId = selectedSite.SmsClientId;
         //    model.SmsSecureToken = selectedSite.SmsSecureToken;
-            
+
         //    return View(model);
         //}
 
@@ -797,16 +822,16 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         //        this.AlertDanger(_sr["oops something went wrong, site was not found."], true);
         //        return RedirectToAction("Index");
         //    }
-            
+
         //    selectedSite.SmsFrom = model.SmsFrom;
         //    selectedSite.SmsClientId = model.SmsClientId;
         //    selectedSite.SmsSecureToken = model.SmsSecureToken;
-            
+
         //    await _siteManager.Update(selectedSite);
-            
+
         //    this.AlertSuccess(string.Format(_sr["SMS Settings for {0} were successfully updated."],
         //                selectedSite.SiteName), true);
-            
+
         //    if ((_siteManager.CurrentSite.IsServerAdminSite)
         //        && (_siteManager.CurrentSite.Id != selectedSite.Id)
         //        )
@@ -840,8 +865,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 SiteId = selectedSite.Id,
                 AllowNewRegistration = selectedSite.AllowNewRegistration,
                 AllowPersistentLogin = selectedSite.AllowPersistentLogin,
-                DisableDbAuth = selectedSite.DisableDbAuth,
-                ReallyDeleteUsers = selectedSite.ReallyDeleteUsers,
+                DisableDbAuth = selectedSite.DisableDbAuth, 
                 RequireApprovalBeforeLogin = selectedSite.RequireApprovalBeforeLogin,
                 RequireConfirmedEmail = selectedSite.RequireConfirmedEmail,
                 UseEmailForLogin = selectedSite.UseEmailForLogin,
@@ -895,7 +919,6 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             selectedSite.AllowNewRegistration = model.AllowNewRegistration;
             selectedSite.AllowPersistentLogin = model.AllowPersistentLogin;
             selectedSite.DisableDbAuth = model.DisableDbAuth;
-            selectedSite.ReallyDeleteUsers = model.ReallyDeleteUsers;
             selectedSite.RequireApprovalBeforeLogin = model.RequireApprovalBeforeLogin;
             selectedSite.RequireConfirmedEmail = model.RequireConfirmedEmail;
             selectedSite.RequireConfirmedPhone = model.RequireConfirmedPhone;
@@ -915,6 +938,93 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
 
             return RedirectToAction("SecuritySettings");
         }
+
+        [HttpGet]
+        [Authorize(Policy = PolicyConstants.AdminPolicy)]
+        public async Task<IActionResult> PrivacySettings(
+            Guid? siteId,
+            int slp = 1)
+        {
+            var selectedSite = await _siteManager.GetSiteForEdit(siteId);
+            // only server admin site can edit other sites settings
+            if (selectedSite.Id != _siteManager.CurrentSite.Id)
+            {
+                ViewData["Title"] = string.Format(CultureInfo.CurrentUICulture, _sr["{0} - Privacy Settings"], selectedSite.SiteName);
+            }
+            else
+            {
+                ViewData["Title"] = _sr["Privacy Settings"];
+            }
+
+
+            var model = new PrivacyPolicyViewModel
+            {
+                SiteId = selectedSite.Id,
+                PrivacyPolicy = selectedSite.PrivacyPolicy,
+                RequireCookieConsent = selectedSite.RequireCookieConsent
+                
+            };
+            if(!string.IsNullOrWhiteSpace(selectedSite.CookiePolicySummary))
+            {
+                model.CookiePolicySummary = selectedSite.CookiePolicySummary;
+            }
+
+            return View(model);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Authorize(Policy = PolicyConstants.AdminPolicy)]
+        public async Task<ActionResult> PrivacySettings(PrivacyPolicyViewModel model)
+        {
+            var selectedSite = await _siteManager.GetSiteForEdit(model.SiteId);
+
+            if (selectedSite == null)
+            {
+                this.AlertDanger(_sr["oops something went wrong."], true);
+                return RedirectToAction("Index");
+            }
+
+            // only server admin site can edit other sites settings
+            if (selectedSite.Id == _siteManager.CurrentSite.Id)
+            {
+                ViewData["Title"] = "Privacy Settings";
+            }
+            else if (_siteManager.CurrentSite.IsServerAdminSite)
+            {
+                ViewData["Title"] = string.Format(CultureInfo.CurrentUICulture, "{0} - Privacy Settings", selectedSite.SiteName);
+            }
+            
+            if (model.SiteId == Guid.Empty)
+            {
+                this.AlertDanger(_sr["oops something went wrong, site was not found."], true);
+                return RedirectToAction("Index");
+            }
+
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            selectedSite.CookiePolicySummary = model.CookiePolicySummary;
+            selectedSite.PrivacyPolicy = model.PrivacyPolicy;
+            selectedSite.RequireCookieConsent = model.RequireCookieConsent;
+            
+            await _siteManager.Update(selectedSite);
+
+            this.AlertSuccess(string.Format(_sr["Privacy Settings for {0} was successfully updated."],
+                        selectedSite.SiteName), true);
+
+            if ((_siteManager.CurrentSite.IsServerAdminSite)
+                && (_siteManager.CurrentSite.Id != selectedSite.Id)
+                )
+            {
+                return RedirectToAction("PrivacySettings", new { siteId = model.SiteId });
+            }
+
+            return RedirectToAction("PrivacySettings");
+        }
+
 
         [HttpGet]
         [Authorize(Policy = PolicyConstants.AdminPolicy)]

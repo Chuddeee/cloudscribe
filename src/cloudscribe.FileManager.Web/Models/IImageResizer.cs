@@ -25,7 +25,19 @@ namespace cloudscribe.FileManager.Web.Models
             int maxWidth,
             int maxHeight,
             bool allowEnlargement = false,
-            int quality = 90 
+            int quality = 70 
+            );
+
+        bool CropExistingImage(
+            string sourceFilePath,
+            string targetFilePath,
+            int offsetX,
+            int offsetY,
+            int widthToCrop,
+            int heightToCrop,
+            int finalWidth,
+            int finalHeight,
+            int quality = 70
             );
 
         ImageSize GetImageSize(string pathToImage);

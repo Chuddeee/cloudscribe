@@ -5,6 +5,7 @@
 // Last Modified:			2018-03-07
 // 
 
+using cloudscribe.Core.DataProtection;
 using cloudscribe.Core.Models;
 using cloudscribe.Pagination.Models;
 using Microsoft.AspNetCore.Http;
@@ -200,6 +201,7 @@ namespace cloudscribe.Core.Web.Components
                 if(_context != null && !string.IsNullOrEmpty(_context.Request.Host.Value))
                 _cacheHelper.ClearCache(_context.Request.Host.Value);
             }
+            _cacheHelper.ClearCache("site-" + site.Id.ToString());
 
             await _eventHandlers.HandleSiteUpdated(site).ConfigureAwait(false);
         }
@@ -350,6 +352,7 @@ namespace cloudscribe.Core.Web.Components
             adminUser.Email = "admin" + siteDifferentiator + "@admin.com";
             adminUser.NormalizedEmail = adminUser.Email.ToUpperInvariant();
             adminUser.UserName = "admin" + siteDifferentiator;
+            adminUser.NormalizedUserName = adminUser.UserName.ToUpperInvariant();
             
             await _userCommands.Create(adminUser, CancellationToken.None);
             

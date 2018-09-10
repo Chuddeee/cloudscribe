@@ -2,15 +2,17 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:					Joe Audette
 // Created:					2016-05-07
-// Last Modified:			2018-03-07
+// Last Modified:			2018-06-19
 // 
 
 
+using cloudscribe.Core.DataProtection;
 using cloudscribe.Core.Models;
 using cloudscribe.Core.Models.Identity;
 using cloudscribe.Core.Web.Analytics;
 using cloudscribe.Core.Web.Components;
 using cloudscribe.Core.Web.Components.Messaging;
+using cloudscribe.Core.Web.Design;
 using cloudscribe.Core.Web.ExtensionPoints;
 using cloudscribe.Core.Web.Mvc.Components;
 using cloudscribe.Core.Web.Navigation;
@@ -26,6 +28,7 @@ using cloudscribe.Web.Common.Razor;
 using cloudscribe.Web.Common.Setup;
 using cloudscribe.Web.Navigation;
 using cloudscribe.Web.Navigation.Caching;
+using cloudscribe.Web.SiteMap;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Razor;
@@ -55,8 +58,15 @@ namespace Microsoft.Extensions.DependencyInjection
 
         public static IServiceCollection AddCloudscribeCoreCommon(this IServiceCollection services, IConfiguration configuration)
         {
-            services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+            services.AddRouting(options =>
+            {
+                options.ConstraintMap.Add("sitefolder", typeof(SiteFolderRouteConstraint));
+            });
 
+            
+
+            services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+            services.AddOptions();
             
             services.Configure<MultiTenantOptions>(configuration.GetSection("MultiTenantOptions"));
             services.Configure<NewUserOptions>(configuration.GetSection("NewUserOptions"));
@@ -64,14 +74,21 @@ namespace Microsoft.Extensions.DependencyInjection
             services.Configure<RecaptchaKeys>(configuration.GetSection("RecaptchaKeys"));
             services.Configure<SiteConfigOptions>(configuration.GetSection("SiteConfigOptions"));
             services.Configure<UIOptions>(configuration.GetSection("UIOptions"));
-            
+
+            services.Configure<CoreIconConfig>(configuration.GetSection("CoreIconConfig"));
+            services.Configure<CoreThemeConfig>(configuration.GetSection("CoreThemeConfig"));
+            services.TryAddScoped<ICoreThemeHelper, CoreThemeHelper>();
+
             services.Configure<CachingSiteResolverOptions>(configuration.GetSection("CachingSiteResolverOptions"));
 
 
-            //services.AddMultitenancy<SiteSettings, SiteResolver>();
-            services.TryAddScoped<ISiteContextResolver, SiteContextResolver>();
+            
+            //services.TryAddScoped<ISiteContextResolver, SiteContextResolver>();
+            services.TryAddScoped<ISiteContextResolver, CachingSiteContextResolver>();
 
-            services.AddMultitenancy<SiteContext, CachingSiteResolver>();
+            //services.AddMultitenancy<SiteContext, CachingSiteResolver>();
+            services.AddMultitenancy<SiteContext, SiteResolver>();
+
             services.AddScoped<CacheHelper, CacheHelper>();
 
             services.AddScoped<SiteEvents, SiteEvents>();
@@ -105,7 +122,9 @@ namespace Microsoft.Extensions.DependencyInjection
             services.Configure<SmtpOptions>(configuration.GetSection("SmtpOptions"));
             services.TryAddScoped<ISmtpOptionsProvider, SiteSmtpOptionsResolver>();
             services.TryAddScoped<IEmailSenderResolver, SiteEmailSenderResolver>();
-            services.AddTransient<ISiteMessageEmailSender, SiteEmailMessageSender>();
+
+            services.AddScoped<ISiteMessageEmailSender, SiteEmailMessageSender>();
+
             //services.AddTransient<ISiteMessageEmailSender, FakeSiteEmailSender>();
             services.TryAddScoped<ISendGridOptionsProvider, SiteSendGridOptionsProvider>();
             services.TryAddScoped<IMailgunOptionsProvider, SiteMailgunOptionsProvider>();
@@ -114,12 +133,14 @@ namespace Microsoft.Extensions.DependencyInjection
             
             services.TryAddSingleton<IThemeListBuilder, SiteThemeListBuilder>();
             //services.AddSingleton<IRazorViewEngine, CoreViewEngine>();
-            services.TryAddScoped<ViewRenderer, ViewRenderer>();
+            services.TryAddScoped<ViewRenderer>();
 
             services.AddSingleton<IOptions<NavigationOptions>, SiteNavigationOptionsResolver>();
             services.AddScoped<ITreeCacheKeyResolver, SiteNavigationCacheKeyResolver>();
             services.AddScoped<INodeUrlPrefixProvider, FolderTenantNodeUrlPrefixProvider>();
             services.AddCloudscribeNavigation(configuration);
+
+            services.AddScoped<ISiteMapNodeService, NavigationTreeSiteMapNodeService>();
 
             // Identity ***
             services.TryAddScoped<ISiteAcountCapabilitiesProvider, SiteAcountCapabilitiesProvider>();
@@ -134,6 +155,8 @@ namespace Microsoft.Extensions.DependencyInjection
             services.TryAddScoped<INewUserDisplayNameResolver, DefaultNewUserDisplayNameResolver>();
 
             services.AddCloudscribeFileManagerIntegration(configuration);
+
+            services.AddScoped<IGuardNeededRoles, AdministratorsRoleGuard>();
 
             return services;
         }
@@ -189,6 +212,13 @@ namespace Microsoft.Extensions.DependencyInjection
                 });
 
             options.AddPolicy(
+                "AdminMenuPolicy",
+                authBuilder =>
+                {
+                    authBuilder.RequireRole("ServerAdmins", "Administrators", "Role Administrators", "Content Administrators");
+                });
+
+            options.AddPolicy(
                 "AdminPolicy",
                 authBuilder =>
                 {
@@ -220,7 +250,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 "RoleLookupPolicy",
                 authBuilder =>
                 {
-                    authBuilder.RequireRole("Role Administrators", "Administrators");
+                    authBuilder.RequireRole("Role Administrators", "Administrators", "Content Administrators");
                 });
 
             return options;

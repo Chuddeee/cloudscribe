@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:					Joe Audette
 // Created:					2014-10-26
-// Last Modified:			2018-04-05
+// Last Modified:			2018-08-20
 // 
 
 using cloudscribe.Core.Identity;
@@ -15,6 +15,7 @@ using cloudscribe.Core.Web.ViewModels.Account;
 using cloudscribe.Core.Web.ViewModels.SiteUser;
 using cloudscribe.Web.Common.Extensions;
 using cloudscribe.Web.Common.Models;
+using cloudscribe.Web.Common.Recaptcha;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -28,7 +29,7 @@ using System.Threading.Tasks;
 
 namespace cloudscribe.Core.Web.Controllers.Mvc
 {
-    [Authorize]
+    
     public class AccountController : Controller
     {
         public AccountController(
@@ -40,6 +41,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             IIdentityServerIntegration identityServerIntegration,
             IStringLocalizer<CloudscribeCore> localizer,
             IRecaptchaKeysProvider recaptchaKeysProvider,
+            IRecaptchaServerSideValidator recaptchaServerSideValidator,
             IHandleCustomRegistration customRegistration,
             IHandleAccountAnalytics analyticsHandler,
             ILogger<AccountController> logger
@@ -53,6 +55,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             StringLocalizer = localizer;
             Log = logger;
             RecaptchaKeysProvider = recaptchaKeysProvider;
+            RecaptchaServerSideValidator = recaptchaServerSideValidator;
             TimeZoneHelper = timeZoneHelper;
             CustomRegistration = customRegistration;
             Analytics = analyticsHandler;
@@ -66,13 +69,14 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         protected ILogger Log { get; private set; }
         protected IStringLocalizer StringLocalizer { get; private set; }
         protected IRecaptchaKeysProvider RecaptchaKeysProvider { get; private set; }
+        protected IRecaptchaServerSideValidator RecaptchaServerSideValidator { get; private set; }
         protected SiteTimeZoneService TimeZoneHelper { get; private set; }
         protected IHandleCustomRegistration CustomRegistration { get; private set; }
         protected IHandleAccountAnalytics Analytics { get; private set; }
 
         protected async Task<IActionResult> HandleLoginSuccess(UserLoginResult result, string returnUrl)
         {
-            Analytics.HandleLoginSuccess(result).Forget();
+            await Analytics.HandleLoginSuccess(result);
 
             if (result.User != null)
             {
@@ -86,6 +90,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 if(
                     (!returnUrl.Contains("/closed"))
                     && (!returnUrl.Contains("/oops/error"))
+                    && (!returnUrl.Contains("/account/logout"))
                     )
                 {
                     return LocalRedirect(returnUrl);
@@ -107,7 +112,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
 
         protected async Task<IActionResult> HandleLoginNotAllowed(UserLoginResult result, string returnUrl)
         {
-            Analytics.HandleLoginNotAllowed(result).Forget();
+            await Analytics.HandleLoginNotAllowed(result);
 
             if (result.User != null)
             {      
@@ -125,13 +130,13 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                             Protocol = HttpContext.Request.Scheme
                         });
 
-                        EmailSender.SendAccountConfirmationEmailAsync(
+                        await EmailSender.SendAccountConfirmationEmailAsync(
                             CurrentSite,
                             result.User.Email,
                             StringLocalizer["Confirm your account"],
                             callbackUrl,
                             result.EmailConfirmationToken
-                            ).Forget();
+                            );
 
 
                         this.AlertSuccess(StringLocalizer["Please check your email inbox, we just sent you a link that you need to click to confirm your account"], true);
@@ -146,10 +151,11 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                     if (timeSpan.TotalDays < 1)
                     {
                         // account was just created so send notification to approver
-                        EmailSender.AccountPendingApprovalAdminNotification(CurrentSite, result.User).Forget();
+                        await EmailSender.AccountPendingApprovalAdminNotification(CurrentSite, result.User);
                     }
 
-                    return RedirectToAction("PendingApproval", new { userId = result.User.Id, didSend = true });
+                    return RedirectToAction("PendingApproval", "Account", new { userId = result.User.Id, didSend = true });
+                    
                 }
             }
 
@@ -158,7 +164,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
 
         protected async Task<IActionResult> HandleRequiresTwoFactor(UserLoginResult result, string returnUrl, bool rememberMe)
         {
-            Analytics.HandleRequiresTwoFactor(result).Forget();
+            await Analytics.HandleRequiresTwoFactor(result);
 
             if (result.User != null)
             {
@@ -174,7 +180,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
 
         protected async Task<IActionResult> HandleLockout(UserLoginResult result = null)
         {
-            Analytics.HandleLockout(result).Forget();
+            await Analytics.HandleLockout(result);
 
             ViewData["Title"] = StringLocalizer["Locked out"];
 
@@ -205,7 +211,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             if (!string.IsNullOrEmpty(idProvider))
             {
                 // if IdP is passed, then bypass showing the login screen
-                return ExternalLogin(idProvider, returnUrl);
+                return await ExternalLogin(idProvider, returnUrl);
             }
 
             ViewData["Title"] = StringLocalizer["Log In"];
@@ -240,7 +246,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             ViewData["Title"] = StringLocalizer["Log In"];
             ViewData["ReturnUrl"] = returnUrl;
 
-            Analytics.HandleLoginSubmit("Onsite").Forget();
+            await Analytics.HandleLoginSubmit("Onsite");
 
             var recaptchaKeys = await RecaptchaKeysProvider.GetKeys().ConfigureAwait(false);
             if ((CurrentSite.CaptchaOnLogin) && (!string.IsNullOrEmpty(recaptchaKeys.PublicKey)))
@@ -259,20 +265,17 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             {
                 var errors = ModelState.Keys.Where(k => ModelState[k].Errors.Count > 0).Select(k => new { propertyName = k, errorMessage = ModelState[k].Errors[0].ErrorMessage });
                 var trackedError = errors.FirstOrDefault().errorMessage;
-                Analytics.HandleLoginFail("Onsite", trackedError).Forget();
+                await Analytics.HandleLoginFail("Onsite", trackedError);
 
                 return View(model);
             }
 
             if ((CurrentSite.CaptchaOnLogin) && (!string.IsNullOrEmpty(recaptchaKeys.PrivateKey)))
             {
-                var recpatchaSecretKey = recaptchaKeys.PrivateKey;
-                var captchaResponse = await this.ValidateRecaptcha(Request, recpatchaSecretKey);
-
+                var captchaResponse = await RecaptchaServerSideValidator.ValidateRecaptcha(Request, CurrentSite.RecaptchaPrivateKey);
                 if (!captchaResponse.Success)
                 {
-                    Analytics.HandleLoginFail("Onsite", "reCAPTCHA Error").Forget();
-
+                    await Analytics.HandleLoginFail("Onsite", "reCAPTCHA Error");
                     ModelState.AddModelError("recaptchaerror", StringLocalizer["reCAPTCHA Error occured. Please try again"]);
                     return View(model);
                 }
@@ -307,7 +310,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             }
             else
             {
-                Analytics.HandleLoginFail("Onsite", StringLocalizer["Invalid login attempt."]).Forget();
+                await Analytics.HandleLoginFail("Onsite", StringLocalizer["Invalid login attempt."]);
 
                 Log.LogInformation($"login did not succeed for {model.Email}");
                 ModelState.AddModelError(string.Empty, StringLocalizer["Invalid login attempt."]);
@@ -372,7 +375,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             }
             else
             {
-                Analytics.HandleLoginFail("Onsite", StringLocalizer["Invalid authenticator code."]).Forget();
+                await Analytics.HandleLoginFail("Onsite", StringLocalizer["Invalid authenticator code."]);
 
 
                 ModelState.AddModelError(string.Empty, StringLocalizer["Invalid authenticator code."]);
@@ -437,7 +440,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             }
             else
             {
-                Analytics.HandleLoginFail("Onsite", StringLocalizer["Invalid recovery code entered."]).Forget();
+                await Analytics.HandleLoginFail("Onsite", StringLocalizer["Invalid recovery code entered."]);
 
 
                 ModelState.AddModelError(string.Empty, StringLocalizer["Invalid recovery code entered."]);
@@ -477,7 +480,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             if (!string.IsNullOrEmpty(idProvider))
             {
                 // if IdP is passed, then bypass showing the login screen
-                return ExternalLogin(idProvider, returnUrl);
+                return await ExternalLogin(idProvider, returnUrl);
             }
             ViewData["ReturnUrl"] = returnUrl;
 
@@ -518,7 +521,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
 
             ViewData["ReturnUrl"] = returnUrl;
 
-            Analytics.HandleRegisterSubmit("Onsite").Forget();
+            await Analytics.HandleRegisterSubmit("Onsite");
 
             if ((CurrentSite.CaptchaOnRegistration) && (!string.IsNullOrWhiteSpace(CurrentSite.RecaptchaPublicKey)))
             {
@@ -544,9 +547,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             {
                 if ((CurrentSite.CaptchaOnRegistration) && (!string.IsNullOrWhiteSpace(CurrentSite.RecaptchaPublicKey)))
                 {
-                    string recpatchaSecretKey = CurrentSite.RecaptchaPrivateKey;
-
-                    var captchaResponse = await this.ValidateRecaptcha(Request, recpatchaSecretKey);
+                    var captchaResponse = await RecaptchaServerSideValidator.ValidateRecaptcha(Request, CurrentSite.RecaptchaPrivateKey);
 
                     if (!captchaResponse.Success)
                     {
@@ -603,16 +604,16 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 var te = result.RejectReasons.FirstOrDefault();
                 if(string.IsNullOrEmpty(te)) { te = "unknown"; }
 
-                Analytics.HandleRegisterFail("Onsite", te).Forget();
+                await Analytics.HandleRegisterFail("Onsite", te);
 
                 Log.LogInformation($"registration did not succeed for {model.Email}");
-               // ModelState.AddModelError(string.Empty, sr["Invalid registration attempt."]);
+                ModelState.AddModelError("registrationError", StringLocalizer["Invalid registration attempt."]);
                 return View(viewName, model);           
             }
 
             var errors = ModelState.Keys.Where(k => ModelState[k].Errors.Count > 0).Select(k => new { propertyName = k, errorMessage = ModelState[k].Errors[0].ErrorMessage });
             var trackedError = errors.FirstOrDefault().errorMessage;
-            Analytics.HandleRegisterFail("Onsite", trackedError).Forget();
+            await Analytics.HandleRegisterFail("Onsite", trackedError);
 
             // If we got this far, something failed, redisplay form
             return View(model);
@@ -622,11 +623,11 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [HttpPost]
         [AllowAnonymous]
         [ValidateAntiForgeryToken]
-        public virtual IActionResult ExternalLogin(string provider, string returnUrl = null)
+        public virtual async Task<IActionResult> ExternalLogin(string provider, string returnUrl = null)
         {
             Log.LogDebug("ExternalLogin called for " + provider + " with returnurl " + returnUrl);
 
-            Analytics.HandleLoginSubmit(provider).Forget();
+            await Analytics.HandleLoginSubmit(provider);
 
             // Request a redirect to the external login provider.
             var redirectUrl = Url.Action("ExternalLoginCallback", "Account", new { ReturnUrl = returnUrl });
@@ -645,7 +646,7 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
             {
                 var errormessage = string.Format(StringLocalizer["Error from external provider: {0}"], remoteError);
 
-                Analytics.HandleLoginFail("Social", errormessage).Forget();
+                await Analytics.HandleLoginFail("Social", errormessage);
 
                 ModelState.AddModelError("providererror", errormessage);
                 return RedirectToAction("Login");
@@ -754,9 +755,16 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 {
                     Log.LogWarning("ExternalLoginInfo was null");
 
-                    Analytics.HandleLoginFail("Social", "ExternalLoginInfo was null").Forget();
+                    await Analytics.HandleLoginFail("Social", "ExternalLoginInfo was null");
 
-                    return View("ExternalLoginFailure");
+                    string message = string.Empty;
+                    var isExistingAccount = await AccountService.IsExistingAccount(model.Email);
+                    if(isExistingAccount)
+                    {
+                        message = StringLocalizer["The provided email address is already in use."];
+                    }
+
+                    return View("ExternalLoginFailure", message);
                 }
 
             }
@@ -882,13 +890,13 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                             new { userId = info.User.Id.ToString(), code = info.EmailVerificationToken },
                             protocol: HttpContext.Request.Scheme);
 
-            EmailSender.SendAccountConfirmationEmailAsync(
+            await EmailSender.SendAccountConfirmationEmailAsync(
                             CurrentSite,
                             info.User.Email,
                             StringLocalizer["Confirm your account"],
                             callbackUrl,
                             info.EmailVerificationToken
-                            ).Forget();
+                            );
 
             await IpAddressTracker.TackUserIpAddress(CurrentSite.Id, info.User.Id);
 
@@ -1025,6 +1033,14 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                     {
                         Log.LogWarning(info.User.Email + ": user tried to use pasword recovery but no email was sent because user email is not confirmed and security settings require confirmed email");
                     }
+                    //2018-08-21 see below, we now have to wait for sending the email
+                    // that delay can be used to determine an account exists
+                    // so add a delay here as well
+                    var random = new Random();
+                    var randomMilliseconds = random.Next(1, 3) * 1000; //between 1 and 3 seconds
+
+                    await Task.Delay(randomMilliseconds);
+
                     // Don't reveal that the user does not exist or is not confirmed
                     return View("ForgotPasswordConfirmation");
                 }
@@ -1041,12 +1057,20 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
                 // vs would show a warning squiggly line here if not for .Forget()
                 //http://stackoverflow.com/questions/35175960/net-core-alternative-to-threadpool-queueuserworkitem
                 //http://stackoverflow.com/questions/22629951/suppressing-warning-cs4014-because-this-call-is-not-awaited-execution-of-the
-                EmailSender.SendPasswordResetEmailAsync(
+                //EmailSender.SendPasswordResetEmailAsync(
+                //    CurrentSite,
+                //    model.Email,
+                //    StringLocalizer["Reset Password"],
+                //    resetUrl).Forget();
+
+                // the above broke in aspnetcore 2.1.x by not awaiting the httpcontext goes out of scope and viewrenderer fails IServiceProvider is disposed
+
+                await EmailSender.SendPasswordResetEmailAsync(
                     CurrentSite,
                     model.Email,
                     StringLocalizer["Reset Password"],
-                    resetUrl).Forget();
-                
+                    resetUrl);
+
 
                 return View("ForgotPasswordConfirmation");
             }
@@ -1070,7 +1094,13 @@ namespace cloudscribe.Core.Web.Controllers.Mvc
         [AllowAnonymous]
         public virtual IActionResult ResetPassword(string code = null)
         {   
-            return code == null ? View("Error") : View();
+            if(string.IsNullOrWhiteSpace(code))
+            {
+                Log.LogInformation("Reset password url with no code, redirecting to site root.");
+                return this.RedirectToSiteRoot(CurrentSite);
+            }
+
+            return View();
         }
 
         // POST: /Account/ResetPassword

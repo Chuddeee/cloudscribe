@@ -1,7 +1,12 @@
 
+// web standards authentication without passwords
+https://www.engadget.com/2018/04/10/fido-w3c-web-authentication/
+
 https://www.jerriepelser.com/blog/creating-dynamic-authorization-policies-aspnet-core/
 
 https://scottsauber.com/2018/01/29/increasing-password-hashing-iterations-with-asp-net-core-identity/
+
+https://leotindall.com/post/pdf-embedding-attacks/
 
 
 https://www.troyhunt.com/locking-down-your-website-scripts-with-csp-hashes-nonces-and-report-uri/

@@ -22,7 +22,6 @@ namespace cloudscribe.Core.Models
             newSite.Theme = "";
             newSite.AllowNewRegistration = true;
             newSite.AutoCreateLdapUserOnFirstLogin = true;
-            newSite.ReallyDeleteUsers = true;
             newSite.LdapPort = 389;
             newSite.LdapRootDN = string.Empty;
             newSite.LdapServer = string.Empty;
@@ -43,6 +42,7 @@ namespace cloudscribe.Core.Models
             adminUser.NormalizedEmail = adminUser.Email.ToUpperInvariant();
             adminUser.DisplayName = "Admin";
             adminUser.UserName = "admin";
+            adminUser.NormalizedUserName = adminUser.UserName.ToUpperInvariant();
 
             adminUser.EmailConfirmed = true;
             adminUser.AccountApproved = true;

@@ -1,17 +1,15 @@
-﻿using cloudscribe.FileManager.Web.Models;
+﻿using cloudscribe.FileManager.Web.Controllers;
+using cloudscribe.FileManager.Web.Models;
 using cloudscribe.FileManager.Web.Services;
-using cloudscribe.FileManager.Web;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using cloudscribe.Web.Common.Setup;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.Razor;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
-using System.Reflection;
-using cloudscribe.FileManager.Web.Controllers;
 using System;
-using cloudscribe.Web.Common.Setup;
+using System.Reflection;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
@@ -19,7 +17,7 @@ namespace Microsoft.Extensions.DependencyInjection
     {
         public static IServiceCollection AddCloudscribeFileManager(
             this IServiceCollection services,
-            IConfiguration configuration = null
+            IConfiguration configuration
             )
         {
             services.TryAddScoped<FileManagerService>();
@@ -29,13 +27,21 @@ namespace Microsoft.Extensions.DependencyInjection
             services.TryAddScoped<IMediaPathResolver, DefaultMediaPathResolver>();
             services.AddScoped<IVersionProvider, FileManagerVersionProvider>();
 
+            
+
             // Angular's default header name for sending the XSRF token.
             services.AddAntiforgery(options => options.HeaderName = "X-XSRF-TOKEN");
 
             if(configuration != null)
             {
                 services.Configure<FileManagerIcons>(configuration.GetSection("FileManagerIcons"));
+                services.Configure<AutomaticUploadOptions>(configuration.GetSection("AutomaticUploadOptions"));
             }
+
+            services.AddAntiforgery(options =>
+            {
+                options.HeaderName = "X-CSRFToken";
+            });
 
             return services;
         }
@@ -75,6 +81,16 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         public static RazorViewEngineOptions AddCloudscribeFileManagerBootstrap3Views(this RazorViewEngineOptions options)
+        {
+            options.FileProviders.Add(new EmbeddedFileProvider(
+                    typeof(FileManagerController).GetTypeInfo().Assembly,
+                    "cloudscribe.FileManager.Web"
+                ));
+
+            return options;
+        }
+
+        public static RazorViewEngineOptions AddCloudscribeFileManagerBootstrap4Views(this RazorViewEngineOptions options)
         {
             options.FileProviders.Add(new EmbeddedFileProvider(
                     typeof(FileManagerController).GetTypeInfo().Assembly,

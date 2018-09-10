@@ -1,7 +1,6 @@
 
-https://blog.emacsen.net/blog/2018/02/16/osm-is-in-trouble/
+https://www.mapbox.com/help/how-web-apps-work/
 
-https://trackchanges.postlight.com/open-source-geo-is-really-something-right-now-f8e310c5f57a?gi=38bcde83fcf8#.wbks9g5ea
 
 https://mapzen.com/
 
@@ -26,6 +25,9 @@ https://github.com/DotSpatial/DotSpatial
 
 https://github.com/OData/odata.net/tree/ODataV4-6.x/src/Microsoft.Spatial
 
+SRS https://en.wikipedia.org/wiki/Spatial_reference_system
+WKT https://en.wikipedia.org/wiki/Well-known_text
+
 https://github.com/NetTopologySuite/GeoAPI
 
 https://github.com/NetTopologySuite/NetTopologySuite
@@ -48,6 +50,9 @@ GPSLatitude  42,56,42.960000000000001
 GPSLongitudeRef  W 
 GPSLongitude  76,25,48.299999999999997 
 
+For ESRI its almost always going to be:
+Lat = Y Long = X
+
 The terms easting and northing are geographic Cartesian coordinates for a point. Easting refers to the eastward-measured distance (or the x-coordinate), while northing refers to the northward-measured distance (or the y-coordinate).
 
 Any point on the Equator's circle is of latitude 0°, the top north is 90° North, the top south is 90° South. Circles parallels to the Equator are of the same latitude. Longitude: it is the West/East value of a point on Earth. Longitudes are lines going from south pole to north pole.
@@ -67,3 +72,66 @@ http://wiki.openstreetmap.org/wiki/EPSG:3857
 http://www.uwgb.edu/dutchs/usefuldata/utmformulas.htm
 
 https://gis.stackexchange.com/questions/142866/how-to-convert-latitude-longitude-to-epsg-3857
+
+http://epsg.io/28992
+
+https://docs.microsoft.com/en-us/sql/t-sql/spatial-geography/stgeomfromtext-geography-data-type
+
+STGeomFromText ( 'geography_tagged_text' , SRID )  
+
+table.geog = geography::STGeomFromText('POINT(-122.360 47.656)', 4326);
+
+STGeomFromText ( 'geometry_tagged_text' , SRID )  
+https://docs.microsoft.com/en-us/sql/t-sql/spatial-geometry/stgeomfromtext-geometry-data-type
+
+## Free map layers
+
+https://maps.nls.uk/projects/api/
+http://geo.nls.uk/maps/api/openlayers.html
+
+bing to certain usage
+https://openlayers.org/en/latest/examples/bing-maps.html
+
+https://www.maptiler.com/
+
+
+## Online Converters
+
+http://spatialreference.org/
+
+https://epsg.io/transform
+
+https://mygeodata.cloud/cs2cs/
+
+
+## Open Stree Maps
+
+Why use OpenStreetMap instead of Google Maps ?
+https://www.openstreetmap.org/user/jbelien/diary/44356
+
+https://switch2osm.org/
+
+https://blog.emacsen.net/blog/2018/02/16/osm-is-in-trouble/
+
+https://trackchanges.postlight.com/open-source-geo-is-really-something-right-now-f8e310c5f57a?gi=38bcde83fcf8#.wbks9g5ea
+
+
+What OpenStreetMap can be
+http://blog.systemed.net/post/15
+
+## Bing Maps
+
+Get basic key
+https://www.microsoft.com/en-us/maps/create-a-bing-maps-key
+https://www.bingmapsportal.com/Application
+
+
+## Google Maps
+
+https://stackoverflow.com/questions/5688745/google-maps-v3-draggable-marker
+
+https://developers.google.com/maps/documentation/javascript/get-api-key
+
+
+
+

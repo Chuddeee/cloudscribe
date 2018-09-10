@@ -2,15 +2,69 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:					Joe Audette
 // Created:					2014-12-09
-// Last Modified:			2018-02-11
+// Last Modified:			2018-05-26
 // 
 
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 
 namespace cloudscribe.Core.Models
 {
     public static class ModelExtensions
     {
+        public static string StartingSegment(this string requestPath)
+        {
+            if (string.IsNullOrEmpty(requestPath)) return requestPath;
+            if (!requestPath.Contains("/")) return requestPath;
+
+            var segments = requestPath.SplitOnCharAndTrim('/');
+            return segments.FirstOrDefault();
+
+
+        }
+
+        public static List<string> SplitOnCharAndTrim(this string s, char c)
+        {
+            List<string> list = new List<string>();
+            if (string.IsNullOrWhiteSpace(s)) { return list; }
+
+            string[] a = s.Split(c);
+            foreach (string item in a)
+            {
+                if (!string.IsNullOrWhiteSpace(item)) { list.Add(item.Trim()); }
+            }
+
+
+            return list;
+        }
+
+        public static string ToInvariantString(this int i)
+        {
+            return i.ToString(CultureInfo.InvariantCulture);
+
+        }
+
+        public static string ToInvariantString(this float i)
+        {
+            return i.ToString(CultureInfo.InvariantCulture);
+
+        }
+
+        public static List<string> SplitOnChar(this string s, char c)
+        {
+            List<string> list = new List<string>();
+            if (string.IsNullOrWhiteSpace(s)) { return list; }
+
+            string[] a = s.Split(c);
+            foreach (string item in a)
+            {
+                if (!string.IsNullOrWhiteSpace(item)) { list.Add(item); }
+            }
+
+
+            return list;
+        }
 
         public static bool IsDeletable(this ISiteRole role, string undeletableRolesSemiColonSeparated)
         {
@@ -21,14 +75,14 @@ namespace cloudscribe.Core.Models
         public static bool IsDeletable(this ISiteRole role, List<string> rolesThatCannotBeDeleted)
         {
             if (role.RoleName == "Administrators") { return false; }
-            if (role.RoleName == "Content Administrators") { return false; }
-            if (role.RoleName == "Authenticated Users") { return false; }
-            if (role.RoleName == "Role Administrators") { return false; }
+            //if (role.RoleName == "Content Administrators") { return false; }
+            //if (role.RoleName == "Authenticated Users") { return false; }
+            //if (role.RoleName == "Role Administrators") { return false; }
 
             if (role.NormalizedRoleName == "Administrators") { return false; }
-            if (role.NormalizedRoleName == "Content Administrators") { return false; }
-            if (role.NormalizedRoleName == "Authenticated Users") { return false; }
-            if (role.NormalizedRoleName == "Role Administrators") { return false; }
+            //if (role.NormalizedRoleName == "Content Administrators") { return false; }
+            //if (role.NormalizedRoleName == "Authenticated Users") { return false; }
+            //if (role.NormalizedRoleName == "Role Administrators") { return false; }
 
             if (rolesThatCannotBeDeleted != null)
             {

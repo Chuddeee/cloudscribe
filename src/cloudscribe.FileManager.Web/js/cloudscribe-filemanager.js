@@ -1,5 +1,8 @@
 ﻿(function () {
     var fileManager = {
+        headers: {
+            'X-CSRFToken': $("#fmconfig").data("anti-forgery-token")
+        },
         treeDataApiUrl: $("#fmconfig").data("filetree-url"),
         fileType: $("#fmconfig").data("filet-type"),
         uploadApiUrl: $("#fmconfig").data("upload-url"),
@@ -13,6 +16,7 @@
         rootVirtualPath: $("#fmconfig").data("root-virtual-path"),
         rootButton: $('#btnRoot'),
         fileSelectorButton: $('#btnSelector'),
+        fileSelectorButtonAlt: $('#btnSelectorAlt'),
         deleteFolderPromptButton: $('#btnDeleteFolderPrompt'),
         deleteFolderButton: $('#btnDeleteFolder'),
         renameFolderPromptButton: $('#btnRenameFolderPrompt'),
@@ -60,6 +64,7 @@
             fileManager.clearServerCropImage();
         },
         setCurrentDirectory: function (virtualPath) {
+            //console.log(virtualPath);
             $("#newFolderCurrentDir").val(virtualPath);
             $("#hdnCurrentVirtualPath").val(virtualPath);
             $("#uploadCurrentDir").val(virtualPath);
@@ -168,6 +173,7 @@
             $.ajax({
                 method: "POST",
                 url: fileManager.createFolderApiUrl,
+                headers: fileManager.headers,
                 data: formData
             }).done(function (data) {
                 // alert(JSON.stringify(data));
@@ -217,6 +223,7 @@
             $.ajax({
                 method: "POST",
                 url: fileManager.deleteFolderApiUrl,
+                headers: fileManager.headers,
                 data: formData
             }).done(function (data) {
                 if (data.succeeded) {
@@ -259,6 +266,7 @@
             $.ajax({
                 method: "POST",
                 url: fileManager.renameFolderApiUrl,
+                headers: fileManager.headers,
                 data: formData
             }).done(function (data) {
                 if (data.succeeded) {
@@ -316,6 +324,7 @@
             $.ajax({
                 method: "POST",
                 url: fileManager.deleteFileApiUrl,
+                headers: fileManager.headers,
                 data: formData
             }).done(function (data) {
                 if (data.succeeded) {
@@ -359,6 +368,7 @@
             $.ajax({
                 method: "POST",
                 url: fileManager.renameFileApiUrl,
+                headers: fileManager.headers,
                 data: formData
             }).done(function (data) {
                 if (data.succeeded) {
@@ -530,6 +540,7 @@
             $('#pnlFiles').fileupload({
                 fileInput: $('#fileupload'),
                 url: fileManager.uploadApiUrl,
+                headers: fileManager.headers,
                 dataType: 'json',
                 autoUpload: false,
                 singleFileUploads: false,
@@ -614,6 +625,7 @@
             this.setupFileLoader();
             this.newFolderButton.on('click', fileManager.createFolder);
             this.fileSelectorButton.on('click', fileManager.selectfile);
+            this.fileSelectorButtonAlt.on('click', fileManager.selectfile);
             this.deleteFolderPromptButton.on('click', fileManager.deleteFolderPrompt);
             this.deleteFolderButton.on('click', fileManager.deleteFolder);
             this.renameFolderPromptButton.on('click', fileManager.renameFolderPrompt);
@@ -1011,6 +1023,7 @@
                 $.ajax({
                     method: "POST",
                     url: fileManager.uploadApiUrl,
+                    headers: fileManager.headers,
                     data: formData,
                     processData: false,
                     contentType:false

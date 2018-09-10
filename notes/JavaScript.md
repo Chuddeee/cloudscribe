@@ -10,8 +10,6 @@ https://medium.com/javascript-scene/elements-of-javascript-style-caa8821cb99f
 
 https://javascriptweblog.wordpress.com/2011/05/31/a-fresh-look-at-javascript-mixins/
 
-Why is bower still in use when they clearly state we should move to yarn/webpack?
-https://github.com/aspnet/Home/issues/2086
 
 Build Web Apps Without All That JavaScript
 https://visualstudiomagazine.com/articles/2017/05/01/build-web-apps.aspx
@@ -119,5 +117,31 @@ data-val-length="Site Name has a maximum length of 255 characters"
 data-val-length-max="255" 
 data-val-required="Site Name is required" id="SiteName" name="SiteName" value="Sample Site" />
 <span class="text-danger field-validation-valid" data-valmsg-for="SiteName" data-valmsg-replace="true"></span> 
+
+## Dirty Forms - prevent navigation
+
+https://www.raymondcamden.com/2015/03/06/warning-a-user-before-they-leave-a-form
+
+https://github.com/snikch/jquery.dirtyforms
+
+https://github.com/codedance/jquery.AreYouSure
+http://plugins.jquery.com/are-you-sure/
+
+https://stackoverflow.com/questions/7317273/warn-user-before-leaving-web-page-with-unsaved-changes
+
+https://stackoverflow.com/questions/959670/generic-way-to-detect-if-html-form-is-edited
+
+https://stackoverflow.com/questions/155739/detecting-unsaved-changes
+
+
+## Custom Events for js objects
+
+https://stackoverflow.com/questions/20835768/addeventlistener-on-custom-object
+
+https://www.sitepoint.com/javascript-custom-events/
+https://caniuse.com/#feat=customevent
+not suppported in IE 11 but polyfill available https://www.npmjs.com/package/custom-event-polyfill
+https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent
+
 
 

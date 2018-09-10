@@ -13,18 +13,12 @@ namespace cloudscribe.Core.Models
         private ISiteUser user;
         public bool AccountApproved
         {
-            get
-            {
-                return user.AccountApproved;
-            }
+            get { return user.AccountApproved; }
         }
 
         public string AvatarUrl
         {
-            get
-            {
-                return user.AvatarUrl;
-            }
+            get { return user.AvatarUrl; }
         }
 
         public DateTime CreatedUtc
@@ -105,15 +99,7 @@ namespace cloudscribe.Core.Models
                 return user.Id;
             }
         }
-
-        public bool IsDeleted
-        {
-            get
-            {
-                return user.IsDeleted;
-            }
-        }
-
+        
         public bool IsLockedOut
         {
             get
@@ -177,15 +163,7 @@ namespace cloudscribe.Core.Models
                 return user.TimeZoneId;
             }
         }
-
-        public bool Trusted
-        {
-            get
-            {
-                return user.Trusted;
-            }
-        }
-
+        
         public string UserName
         {
             get
